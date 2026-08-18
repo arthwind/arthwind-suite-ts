@@ -1622,3 +1622,26 @@ própria foto já anexada em vez do botão de adicionar a próxima.
   na hora, antes que o resto do código tenha chance de pegá-la por engano
   como se fosse a aba do formulário. Cobre esse bug específico E qualquer
   variação parecida que apareça no futuro.
+
+## Bug corrigido: auditoria "não conseguiu acessar" logo depois da Fase 0
+
+Reportado pelo usuário: rodando a Automação Completa, às vezes a auditoria
+ao vivo do Módulo 24 dizia que não conseguiu acessar a página, logo depois
+da Fase 0 (Inspection Report) terminar — sem nenhum erro visível na Fase 0
+em si, ela só parava de conseguir auditar e já ia direto preenchendo os
+defeitos sem confirmar o que já existia.
+
+**Causa raiz** (diagnosticado pelo usuário): `runFullAutomation` fecha a
+aba da Fase 0 (`await page.close()`) e chama o Módulo 24 logo em seguida.
+O Módulo 24 pega "a primeira página não-fechada" do contexto pra fazer a
+auditoria (`auditContext.pages().find((p) => !p.isClosed())`) — mas
+`page.close()` pode resolver antes do Playwright/CDP terminar de remover
+a página de `context.pages()` de fato (mais visível no Windows). Nessa
+janela de tempo, a página que acabou de ser fechada ainda podia aparecer
+como "não fechada" — e o Módulo 24 tentava usar exatamente ELA.
+
+**Fix**: depois do `page.close()`, `runFullAutomation` agora espera de
+verdade `page.isClosed()` virar `true` (até 3s, checando a cada 100ms) e
+ainda soma uma folga de 300ms antes de chamar o Módulo 24 — dá tempo do
+fechamento se propagar de verdade antes de qualquer coisa tentar pegar
+uma página do contexto.

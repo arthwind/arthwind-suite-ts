@@ -1365,6 +1365,21 @@ export async function runFullAutomation(
       const derivedIncidentUrl = page.url()
       await page.close().catch(() => {})
 
+      // Espera o fechamento de verdade se propagar antes de seguir — bug real
+      // achado em teste: `page.close()` pode resolver antes do Playwright/CDP
+      // terminar de remover a página de `context.pages()` de fato (folga maior
+      // no Windows), e a auditoria do Módulo 24 logo em seguida (que pega "a
+      // primeira página não-fechada" do contexto) podia acabar pegando ESSA
+      // mesma página, ainda numa janela de tempo em que `isClosed()` não tinha
+      // virado true de verdade — resultando em "não conseguiu acessar" na
+      // auditoria, mesmo já tendo fechado a aba explicitamente.
+      let waitedMs = 0
+      while (!page.isClosed() && waitedMs < 3000) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        waitedMs += 100
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
       const moduleResult = await runSnowDamageAutomation(
         folder.excelPath,
         derivedIncidentUrl,
