@@ -1593,3 +1593,32 @@ era um caminho novo que nunca tinha essa conexão feita.
 **Fix**: `handleRunFullAutomation` agora inclui `moduleOptions: {
 autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }`
 (mesmos estados já usados pelo formulário manual mais abaixo na tela).
+
+## Bug intermitente corrigido: clique acertava a foto já anexada, abrindo aba nova
+
+Reportado pelo usuário — raro, "de vez em quando": o robô clicava na
+FOTO que já tinha sido anexada (não no botão de adicionar), abrindo uma
+aba nova do Chromium com a imagem. Essa aba nova passava a ser tratada
+como se fosse a aba do formulário — fechando manualmente, o robô dizia
+"instância fechada" e pulava a linha; deixando aberta, ele travava sem
+conseguir avançar.
+
+**Causa raiz**: o seletor de fallback do botão "Add attachments" em
+`uploadPhotos` era largo demais —
+`scope.locator('a, button', { hasText: /attachment/i })` casa com
+QUALQUER link/botão cujo texto contenha a palavra "attachment", não só o
+botão de adicionar. Só dava problema depois que a 1ª foto de uma linha já
+tinha subido e aparecia anexada na tela (daí o "de vez em quando") — a
+partir daí, esse seletor largo às vezes casava com o link/legenda da
+própria foto já anexada em vez do botão de adicionar a próxima.
+
+**Fix**:
+- Seletor apertado pra exigir "add" JUNTO com "attachment" no texto
+  (`/add attachments?/i`), não só a palavra solta — não bate mais com um
+  anexo já existente.
+- Rede de segurança adicional: depois do clique, se uma aba nova
+  inesperada abriu (esse clique NUNCA deveria abrir aba — só o seletor de
+  arquivo nativo do sistema, capturado via `filechooser`), ela é fechada
+  na hora, antes que o resto do código tenha chance de pegá-la por engano
+  como se fosse a aba do formulário. Cobre esse bug específico E qualquer
+  variação parecida que apareça no futuro.

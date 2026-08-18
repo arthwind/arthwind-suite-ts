@@ -519,17 +519,43 @@ class DamageEntryFiller extends ServiceNowFormFiller {
           const fileName = path.basename(filePath)
 
           // 1. Clica no botão "Add attachments" (📎) para cada foto individualmente
+          //
+          // O fallback antigo (`a, button` com `hasText: /attachment/i`) era largo
+          // demais — bug real achado em teste: depois que a 1ª foto de uma linha já
+          // tinha subido e aparecia anexada na tela, esse seletor às vezes casava
+          // com o link/legenda da PRÓPRIA foto já anexada em vez do botão de
+          // adicionar, e o clique abria uma aba nova do Chromium com a imagem — que
+          // ficava sendo tratada como se fosse a aba do formulário dali em diante
+          // (travando ou "fechando a instância" na linha seguinte). Trocado pra
+          // exigir "add" JUNTO com "attachment" no texto, não só a palavra solta —
+          // não bate mais com um anexo já existente, só com o botão de adicionar.
           const attachmentBtn = scope
-            .locator('.attachment-button, [title*="attachment"]')
-            .or(scope.getByText(/add attachments/i))
-            .or(scope.locator('a, button', { hasText: /attachment/i }))
+            .locator('.attachment-button, [title*="attachment" i]')
+            .or(scope.getByText(/add attachments?/i))
+            .or(scope.locator('a, button', { hasText: /add attachments?/i }))
             .first()
 
           let setViaChooser = false
           if (await attachmentBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+            const pagesBefore = this.page.context().pages().length
             const fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 3000 }).catch(() => null)
             await attachmentBtn.click({ force: true }).catch(() => {})
             const fileChooser = await fileChooserPromise
+
+            // Rede de segurança: esse clique NUNCA deveria abrir uma aba nova (só o
+            // seletor de arquivo nativo, capturado acima) — se abriu, é sinal de que
+            // acertou outra coisa por engano (ver comentário acima). Fecha a aba
+            // extra na hora, antes que o resto do código tenha chance de pegá-la por
+            // engano como se fosse a aba do formulário.
+            const pagesNow = this.page.context().pages()
+            if (pagesNow.length > pagesBefore) {
+              for (const extraPage of pagesNow.slice(pagesBefore)) {
+                if (extraPage !== this.page && !extraPage.isClosed()) {
+                  this.log(`  ⚠ O clique em "Add attachments" abriu uma aba inesperada — fechando (provavelmente acertou um anexo já existente por engano).`)
+                  await extraPage.close().catch(() => {})
+                }
+              }
+            }
 
             if (fileChooser) {
               await fileChooser.setFiles([filePath])
