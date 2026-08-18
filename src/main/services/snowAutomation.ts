@@ -1291,13 +1291,27 @@ function normalizeFailureType(s: string): string {
  * da tela, mas filtra fora qualquer ocorrência dentro de uma `<table>` — a lista é uma
  * tabela, o painel de detalhe não é, então isso separa as duas ocorrências sem
  * depender de rótulo/associação de formulário nenhuma. */
-async function readRowAttachmentFilename(
+/** Resultado da leitura do anexo de uma linha "candidata a vídeo" (DF 45 + Failure
+ * Type "Type of failure is missing"). Esse Failure Type NÃO é exclusivo de vídeo —
+ * o Módulo 23 também usa o mesmo texto fixo pra vários defeitos de FOTO (ex.:
+ * "Bonding paste failure", "LPS Disconnected/Damaged", "Damaged Laminate" — ver
+ * `SnowMappings.FAILURE_TYPES` em snowProcessor.ts). Achado em teste real: um
+ * defeito de foto caiu por coincidência em DF 45 com esse Failure Type, entrou no
+ * fluxo de vídeo, nunca achou um `.mp4` (porque não tem vídeo nenhum, é foto),
+ * ficou 15s tentando e nunca foi marcado como já cadastrado — arriscando duplicata
+ * no reprocessamento seguinte. */
+type AttachmentReadResult =
+  | { kind: 'video'; filename: string }
+  | { kind: 'photo' }
+  | { kind: 'unknown' }
+
+async function readRowAttachmentKind(
   page: Page,
   expectedDamNumber: string,
   log: LogFn,
   timeoutMs: number = 15000
-): Promise<string | null> {
-  if (!expectedDamNumber) return null
+): Promise<AttachmentReadResult> {
+  if (!expectedDamNumber) return { kind: 'unknown' }
   const expectedNorm = expectedDamNumber.trim()
   const deadline = Date.now() + timeoutMs
   let lastSeenOutsideTable = false
@@ -1327,20 +1341,28 @@ async function readRowAttachmentFilename(
       }
       if (!foundOutsideTable) continue // painel ainda não mostra esse número fora da lista — segue esperando
 
-      const attachment = s.getByText(/\.mp4$/i).first()
-      const attachmentVisible = await attachment.isVisible({ timeout: 500 }).catch(() => false)
-      if (!attachmentVisible) {
-        log(`    (achou "${expectedNorm}" fora da tabela, mas não achou nenhum anexo .mp4 visível ainda)`)
-        continue
+      const videoAttachment = s.getByText(/\.mp4$/i).first()
+      if (await videoAttachment.isVisible({ timeout: 500 }).catch(() => false)) {
+        const text = ((await videoAttachment.textContent().catch(() => '')) || '').trim()
+        if (text) return { kind: 'video', filename: text }
       }
 
-      const text = ((await attachment.textContent().catch(() => '')) || '').trim()
-      if (text) return text
+      // Não achou .mp4 — antes de continuar esperando (achando que o vídeo ainda
+      // não terminou de aparecer), confirma se já tem uma FOTO anexada. Se tiver,
+      // não é vídeo nenhum — é um defeito de foto que só coincide em DF 45 +
+      // Failure Type, e já está cadastrado de verdade.
+      const photoAttachment = s.getByText(/\.(jpe?g|png)$/i).first()
+      if (await photoAttachment.isVisible({ timeout: 500 }).catch(() => false)) {
+        log(`    (achou "${expectedNorm}" fora da tabela com anexo de FOTO, não vídeo — não é uma linha de vídeo de verdade, é um defeito comum)`)
+        return { kind: 'photo' }
+      }
+
+      log(`    (achou "${expectedNorm}" fora da tabela, mas não achou nenhum anexo .mp4/foto visível ainda)`)
     }
     await page.waitForTimeout(500)
   }
   log(`    (timeout: "${expectedNorm}" nunca apareceu fora da tabela da lista — ${bestCandidateCount} ocorrência(s) do número vistas no total, todas dentro de tabela)`)
-  return null
+  return { kind: 'unknown' }
 }
 
 /** Extrai Section+Area do nome do arquivo de vídeo gerado pelo Módulo 23 (padrão
@@ -1392,7 +1414,7 @@ async function scanCurrentListPage(
     const descIdx = headers.findIndex((h) => h.includes('damage description'))
     // "Number" (o DAM da entrada, ex.: "DAM1117031") é a primeira coluna com esse nome
     // exato — usada como âncora pra confirmar que o painel de detalhe já atualizou pra
-    // linha certa antes de ler o anexo (ver readRowAttachmentFilename). DF Start não
+    // linha certa antes de ler o anexo (ver readRowAttachmentKind). DF Start não
     // serve pra isso no caso de vídeo: é IGUAL pras 4 linhas do mesmo grupo ambíguo.
     const numberIdx = headers.findIndex((h) => h === 'number')
 
@@ -1448,7 +1470,7 @@ async function scanCurrentListPage(
     // 1. Vídeo (DF Start = 45): ESPERADO ter até 4 linhas iguais (uma por quadrante —
     //    Section 1/2 × PS/SS —, que só diferem em campos que não aparecem na lista).
     //    Não são duplicatas de verdade — desambiguadas lendo o nome do anexo de cada
-    //    uma (ver readRowAttachmentFilename).
+    //    uma (ver readRowAttachmentKind).
     // 2. Qualquer outro DF: mais de uma linha com a mesma pá+componente+falha+DF é,
     //    na prática, sempre uma DUPLICATA de verdade (defeitos reais raramente têm
     //    exatamente essa colisão por acaso) — confirma direto, sem precisar abrir nada.
@@ -1512,11 +1534,17 @@ async function scanCurrentListPage(
       for (const info of group) {
         attachmentLookupsUsed++
         await rows.nth(info.r).click({ force: true }).catch(() => {})
-        const filename = await readRowAttachmentFilename(page, info.damNumber, log)
-        const quadrant = filename ? parseVideoAttachmentQuadrant(filename) : null
-        if (quadrant) {
+        const result = await readRowAttachmentKind(page, info.damNumber, log)
+        const quadrant = result.kind === 'video' ? parseVideoAttachmentQuadrant(result.filename) : null
+        if (quadrant && result.kind === 'video') {
           auditSet.add(`${baseKey}_${quadrant.sectionNorm}_shell_${quadrant.areaNorm}`)
-          log(`  ✓ ${info.damNumber || '?'}: anexo "${filename}" → ${quadrant.sectionNorm} / ${quadrant.areaNorm}.`)
+          log(`  ✓ ${info.damNumber || '?'}: anexo "${result.filename}" → ${quadrant.sectionNorm} / ${quadrant.areaNorm}.`)
+        } else if (result.kind === 'photo') {
+          // Não é vídeo de verdade (Failure Type "Type of failure is missing" também
+          // é usado por defeitos de foto) — marca pela chave normal (sem qualificação
+          // de quadrante), igual ao caminho não-vídeo, pra não reprocessar/duplicar.
+          auditSet.add(baseKey)
+          log(`  ✓ ${info.damNumber || '?'}: tem anexo de foto (não vídeo) — marcando como defeito comum já cadastrado ("${baseKey}").`)
         } else {
           // Sem confirmar qual quadrante é, não marca nada — mesma filosofia de
           // sempre: prefere o risco de reabrir uma aba já feita a pular um vídeo que
@@ -1534,7 +1562,7 @@ async function scanCurrentListPage(
  * — "Rows 1 - 20 of 47", com setas "<"/">" no rodapé) e devolve se avançou de verdade.
  * Não sabemos o seletor exato de antemão, então tenta vários padrões comuns; considera
  * "sem próxima página" se o botão estiver desabilitado/ausente. */
-async function goToNextListPage(page: Page): Promise<boolean> {
+async function goToNextListPage(page: Page, log?: LogFn): Promise<boolean> {
   const scopes = [page, ...page.frames()]
   for (const s of scopes) {
     const candidates = [
@@ -1551,13 +1579,62 @@ async function goToNextListPage(page: Page): Promise<boolean> {
           (await el.isDisabled().catch(() => false)) ||
           (await el.getAttribute('aria-disabled').catch(() => null)) === 'true' ||
           (await el.getAttribute('disabled').catch(() => null)) !== null
-        if (isDisabled) return false
+        if (isDisabled) {
+          log?.(`  ℹ Controle de "próxima página" achado mas desabilitado — assumindo fim da lista.`)
+          return false
+        }
         await el.click({ force: true }).catch(() => {})
         return true
       }
     }
   }
+  log?.(`  ℹ Nenhum controle de "próxima página" encontrado nessa tela — lista provavelmente não usa paginação por botão (carrega tudo por rolagem).`)
   return false
+}
+
+/** Rola a lista até o fim repetidamente e reconta as linhas de qualquer `<table>` da
+ * tela — cobre o caso (achado em teste real: turbina com 39 entradas confirmadas de
+ * verdade no ServiceNow, mas a auditoria só lia 16 e nunca tentava avançar de página)
+ * em que essa lista específica não usa paginação clássica por botão "próxima" — é um
+ * widget Angular (Service Portal) que renderiza/carrega mais linhas conforme rola a
+ * tela (scroll infinito ou virtualização). Sem isso, só as linhas já renderizadas na
+ * carga inicial entravam na auditoria, e tudo que ficava "abaixo da dobra" nunca era
+ * lido — 39 entradas reais viravam 16 encontradas, e as 23 restantes eram tratadas
+ * como "faltando" mesmo já cadastradas. Rola até a contagem de linhas parar de
+ * crescer por duas leituras seguidas (ou até o teto de segurança). */
+async function growVisibleRowsUntilStable(page: Page, log: LogFn): Promise<void> {
+  const MAX_SCROLLS = 60
+  let lastCount = -1
+  let stableStreak = 0
+
+  for (let i = 0; i < MAX_SCROLLS; i++) {
+    const scopes = [page, ...page.frames()]
+    let count = 0
+    let lastRow: import('playwright').Locator | null = null
+    for (const s of scopes) {
+      const rows = s.locator('table tbody tr')
+      const c = await rows.count().catch(() => 0)
+      if (c > count) {
+        count = c
+        lastRow = rows.last()
+      }
+    }
+
+    if (count === lastCount) {
+      stableStreak++
+      if (stableStreak >= 2) break // duas leituras seguidas sem crescer — acabou de carregar
+    } else {
+      if (lastCount !== -1) {
+        log(`  ℹ Lista cresceu ao rolar: ${lastCount} → ${count} linha(s).`)
+      }
+      stableStreak = 0
+    }
+    lastCount = count
+
+    if (!lastRow) break
+    await lastRow.scrollIntoViewIfNeeded().catch(() => {})
+    await page.waitForTimeout(400)
+  }
 }
 
 /** Lê TODAS as páginas da lista "Damage Report Entries" (pagina em blocos de ~20),
@@ -1576,6 +1653,7 @@ async function scanDamageEntriesTableByColumn(
 
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
     await page.waitForTimeout(300)
+    await growVisibleRowsUntilStable(page, log)
 
     const before = auditSet.size
     const found = await scanCurrentListPage(page, auditSet, log, stats, skipVideoAudit)
@@ -1586,7 +1664,7 @@ async function scanDamageEntriesTableByColumn(
       break // não achou tabela nenhuma na primeira página, nem adianta tentar paginar
     }
 
-    const advanced = await goToNextListPage(page)
+    const advanced = await goToNextListPage(page, log)
     if (!advanced) break
 
     await page.waitForLoadState('domcontentloaded').catch(() => {})
@@ -1878,9 +1956,13 @@ export interface RunAutomationResult {
   errors: string[]
   error?: string
   // Vídeos (DF 45-50) nunca são auto-submetidos (ver fase 3 de runSnowDamageAutomation)
-  // — ficam preenchidos e com upload disparado, mas SEMPRE em abas abertas pra revisão
-  // manual, mesmo em modo Submissão Automática. Contados à parte de processed/failed
-  // porque "preenchido, aguardando revisão" não é a mesma coisa que "ok" ou "falhou".
+  // — ficam preenchidos e SEMPRE em abas abertas pra revisão manual, mesmo em modo
+  // Submissão Automática. `videosFilled` só conta quando o upload foi CONFIRMADO
+  // (nome do arquivo apareceu como anexo) — não basta ter preenchido os campos, já
+  // que o upload em si é assíncrono e pode falhar sem erro nenhum no formulário.
+  // `videosFailed` só conta depois de esgotadas as rodadas de retentativa
+  // automática (ver `MAX_VIDEO_ROUNDS`). Contados à parte de processed/failed
+  // porque "confirmado, aguardando revisão" não é a mesma coisa que "ok" ou "falhou".
   videosFilled?: number
   videosFailed?: number
   // Presentes só quando `options.dryRun` foi usado — ver comentário na opção.
@@ -2016,6 +2098,39 @@ async function openDamageEntryForm(
   }
 
   return formPage
+}
+
+/** Confere, numa aba de vídeo já preenchida e deixada aberta (fase 3, cascata), se
+ * o upload de fato TERMINOU de verdade — não só se os campos foram preenchidos
+ * (isso é síncrono e sempre "funciona"), procurando o nome do arquivo de vídeo
+ * aparecer na lista de anexos do próprio formulário. Mesma lógica de
+ * `DamageEntryFiller.waitForAttachmentUploaded`, mas como função solta (chamada de
+ * fora da classe, depois que todas as abas de vídeo da rodada já foram abertas —
+ * ver comentário na Fase 3 de `runSnowDamageAutomation` sobre por que a checagem
+ * roda DEPOIS de abrir todas as abas, não uma de cada vez). */
+async function verifyVideoAttached(
+  formPage: Page,
+  expectedFilename: string,
+  log: LogFn,
+  timeoutMs: number = 180000
+): Promise<boolean> {
+  const pollIntervalMs = 1000
+  const logEveryMs = 15000
+  const start = Date.now()
+  let lastLog = start
+  while (Date.now() - start < timeoutMs) {
+    const scopes = [formPage, ...formPage.frames()]
+    for (const s of scopes) {
+      const appeared = await s.getByText(expectedFilename, { exact: false }).first().isVisible({ timeout: 500 }).catch(() => false)
+      if (appeared) return true
+    }
+    if (Date.now() - lastLog >= logEveryMs) {
+      lastLog = Date.now()
+      log(`  ⏳ Ainda conferindo upload de "${expectedFilename}"... (${Math.round((Date.now() - start) / 1000)}s)`)
+    }
+    await formPage.waitForTimeout(pollIntervalMs).catch(() => {})
+  }
+  return false
 }
 
 export async function runSnowDamageAutomation(
@@ -2384,74 +2499,134 @@ export async function runSnowDamageAutomation(
 
     // ─── Fase 3: Vídeos, uma aba por vídeo, em cascata — NUNCA auto-submetidos ───
     // Cada vídeo: abre aba própria, preenche o formulário, dispara o upload SEM
-    // esperar terminar, e já parte pro próximo — o formulário fica aberto, sem
-    // clicar Submit, mesmo em modo Submissão Automática. Isso é proposital, não uma
-    // limitação: o upload de vídeo é bem mais lento e menos previsível que o resto,
-    // então a confirmação final fica sempre com o inspetor (evita repetir o bug de
-    // submeter antes do upload terminar, sem precisar ficar verificando "terminou de
-    // verdade?"). Consequência aceita: vídeo não entra no histórico local
-    // (snow_submitted_rows.json) — a proteção contra duplicata pra vídeo depende só
-    // da auditoria ao vivo na próxima rodada.
+    // esperar terminar, e já parte pro próximo — evita bloquear a fila inteira
+    // esperando um upload lento terminar. O formulário fica sempre aberto, sem
+    // clicar Submit, mesmo em modo Submissão Automática — a confirmação final
+    // continua sendo do inspetor.
+    //
+    // Depois de abrir TODAS as abas da rodada (não uma de cada vez — é isso que
+    // preserva o ganho de tempo da cascata), roda uma segunda passada CONFERINDO
+    // cada aba: o nome do arquivo de vídeo realmente apareceu como anexo, ou o
+    // upload nunca terminou/falhou? Pedido do usuário: sem essa checagem, um
+    // upload que falhar silenciosamente (rede lenta, timeout do ServiceNow) só
+    // seria percebido se alguém abrisse a aba manualmente e reparasse — numa fila
+    // overnight sem ninguém olhando, isso deixaria vídeo pendente pra descobrir só
+    // depois. Vídeo que não confirma o upload tem a aba descartada e é
+    // reprocessado automaticamente (até `MAX_VIDEO_ROUNDS` rodadas, mesmo padrão
+    // de retentativa da Fase 1) — como os dados já foram preenchidos uma vez, a
+    // auditoria ao vivo da rodada seguinte já teria essa entrada se ela tivesse
+    // sido submetida por engano nesse meio tempo, então o reprocessamento é
+    // seguro. Só depois de esgotar as rodadas um vídeo é reportado como falha de
+    // verdade — nenhum fica "pendurado" esperando checagem manual.
+    const MAX_VIDEO_ROUNDS = 3
     let videosFilled = 0
     let videosFailed = 0
 
     if (videoRows.length > 0) {
-      log(`🎬 ${videoRows.length} vídeo(s) a preencher — sempre em modo manual, cada um numa aba própria, sem esperar o upload terminar (revisão e Submit final ficam com você).`)
+      log(`🎬 ${videoRows.length} vídeo(s) a preencher — sempre em modo manual, cada um numa aba própria (revisão e Submit final ficam com você).`)
 
-      for (let vi = 0; vi < videoRows.length; vi++) {
-        const row = videoRows[vi]
-        const prefix = `[Vídeo ${vi + 1}/${videoRows.length}]`
-        try {
-          let context: BrowserContext
+      type OpenVideoTab = { row: DamageReportRow; formPage: Page; expectedFilename: string; prefix: string }
+      let videoRoundRows = videoRows
+
+      for (let round = 1; round <= MAX_VIDEO_ROUNDS && videoRoundRows.length > 0; round++) {
+        if (round > 1) {
+          log(`🔁 Rodada ${round}/${MAX_VIDEO_ROUNDS} de vídeo — ${videoRoundRows.length} upload(s) não confirmado(s), reprocessando...`)
+        }
+
+        // 3a) Preenche todos os vídeos da rodada, uma aba cada, sem esperar upload.
+        const openTabs: OpenVideoTab[] = []
+        for (let vi = 0; vi < videoRoundRows.length; vi++) {
+          const row = videoRoundRows[vi]
+          const prefix = `[Vídeo ${round > 1 ? `R${round} ` : ''}${vi + 1}/${videoRoundRows.length}]`
           try {
-            context = await getContext(options.headless ?? false)
-          } catch {
-            await closeServiceNowSession()
-            context = await getContext(options.headless ?? false)
+            let context: BrowserContext
+            try {
+              context = await getContext(options.headless ?? false)
+            } catch {
+              await closeServiceNowSession()
+              context = await getContext(options.headless ?? false)
+            }
+
+            const targetPage = await context.newPage()
+            await targetPage.bringToFront().catch(() => {})
+            await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+
+            const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
+            if (existsInSnow) {
+              log(`  ℹ [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
+              await targetPage.close().catch(() => {})
+              continue
+            }
+
+            const formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
+            if (!formPage) {
+              throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
+            }
+
+            let localPhotos = options.localPhotosDir
+              ? findLocalPhotosFromMap(photosMap, row)
+              : []
+            if (localPhotos.length === 0 && options.localPhotosDir) {
+              localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
+            }
+
+            const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
+            // autoSubmit=false (nunca submete) + waitForVideoUpload=false (dispara e
+            // segue, não bloqueia esperando o upload terminar de verdade — a
+            // confirmação vem depois, na passada 3b, DEPOIS de todas as abas abertas)
+            await filler.fill(row, localPhotos, false, false)
+
+            const videoPath = localPhotos.find((p) => isVideoFile(p))
+            const expectedFilename = videoPath ? path.basename(videoPath) : ''
+            openTabs.push({ row, formPage, expectedFilename, prefix })
+            log(`  ✓ ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber}.`)
+          } catch (err: any) {
+            videosFailed++
+            const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
+            errors.push(msg)
+            log(msg)
           }
+        }
 
-          const targetPage = await context.newPage()
-          await targetPage.bringToFront().catch(() => {})
-          await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-
-          const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
-          if (existsInSnow) {
-            log(`  ℹ [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
-            await targetPage.close().catch(() => {})
+        // 3b) Confere cada aba aberta — só agora, com todos os uploads já em
+        // andamento em paralelo, é que espera cada um confirmar de verdade.
+        const failedThisRound: DamageReportRow[] = []
+        for (const tab of openTabs) {
+          if (!tab.expectedFilename) {
+            // Não deu pra identificar o arquivo de vídeo esperado (nome local não
+            // achado) — não dá pra confirmar o upload, mas também não força
+            // retentativa eterna por falta de dado pra comparar.
+            videosFilled++
+            log(`  ⚠ ${tab.prefix} Não foi possível identificar o nome do arquivo esperado — deixando aberta sem confirmar upload.`)
             continue
           }
-
-          const formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
-          if (!formPage) {
-            throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
+          const confirmed = await verifyVideoAttached(tab.formPage, tab.expectedFilename, log)
+          if (confirmed) {
+            videosFilled++
+            log(`  ✓ ${tab.prefix} Upload confirmado: "${tab.expectedFilename}" — aba aberta pra revisão manual (Submit fica com você).`)
+          } else {
+            log(`  ⚠ ${tab.prefix} Upload de "${tab.expectedFilename}" NÃO confirmado — descartando aba e reprocessando essa linha.`)
+            await tab.formPage.close().catch(() => {})
+            failedThisRound.push(tab.row)
           }
-
-          let localPhotos = options.localPhotosDir
-            ? findLocalPhotosFromMap(photosMap, row)
-            : []
-          if (localPhotos.length === 0 && options.localPhotosDir) {
-            localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
-          }
-
-          const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
-          // autoSubmit=false (nunca submete) + waitForVideoUpload=false (dispara e
-          // segue, não bloqueia esperando o upload terminar de verdade)
-          await filler.fill(row, localPhotos, false, false)
-
-          videosFilled++
-          log(`✓ ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber} — aba aberta pra revisão manual (Submit fica com você).`)
-        } catch (err: any) {
-          videosFailed++
-          const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
-          errors.push(msg)
-          log(msg)
         }
+
+        if (failedThisRound.length === 0) break
+        if (round === MAX_VIDEO_ROUNDS) {
+          videosFailed += failedThisRound.length
+          for (const row of failedThisRound) {
+            errors.push(`✗ Vídeo não confirmou upload após ${round} rodada(s): ${row.bladeSerialNumber}`)
+          }
+          log(`⚠ ${failedThisRound.length} vídeo(s) não confirmaram upload mesmo após ${round} rodadas — reportando como falha, não vai tentar de novo.`)
+          break
+        }
+        videoRoundRows = failedThisRound
       }
 
-      log(`🎬 Vídeos concluídos: ${videosFilled} preenchido(s) aguardando revisão manual, ${videosFailed} falha(s).`)
+      log(`🎬 Vídeos concluídos: ${videosFilled} confirmado(s) aguardando revisão manual, ${videosFailed} falha(s).`)
     }
 
-    log(`Concluído: ${processed} ok, ${failed} falha(s) de ${nonVideoRows.length} defeito(s)/blank(s)${videoRows.length > 0 ? `; ${videosFilled} vídeo(s) preenchido(s) aguardando revisão, ${videosFailed} falha(s)` : ''}.`)
+    log(`Concluído: ${processed} ok, ${failed} falha(s) de ${nonVideoRows.length} defeito(s)/blank(s)${videoRows.length > 0 ? `; ${videosFilled} vídeo(s) confirmado(s) aguardando revisão, ${videosFailed} falha(s)` : ''}.`)
     return { success: true, processed, failed, errors, videosFilled, videosFailed }
   } catch (err: any) {
     return { success: false, processed: 0, failed: 0, errors: [], error: err.message }

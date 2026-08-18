@@ -1186,3 +1186,121 @@ Electron/React — só a lógica de `snowAutomation.ts` +
 dependências que `snowProcessor.ts` puxa (`polygonUtils.ts`,
 `bladeSets.ts`), chamado via linha de comando. Ver `README.md` do
 pacote pra instruções de uso (inclui o modo `--dry-run`).
+
+## Bug corrigido: auditoria via Modo Auditoria (dry run) via undercontava a lista — não paginava/rolava direito
+
+Achado testando o Modo Auditoria numa turbina real: o dry run reportou 19
+itens faltando (13 defeitos, 2 blanks, 4 vídeos), mas o usuário confirmou
+direto no ServiceNow que as **39 entradas já existiam de verdade** (batendo
+exatamente com as 39 linhas da planilha) — as duas rodadas anteriores
+tinham sido em modo Submissão Automática, então já tinham sido
+efetivamente cadastradas. O log mostrava só "Página 1 da lista lida (+16
+entrada(s))" e nunca tentava uma página 2.
+
+**Causa raiz**: `scanDamageEntriesTableByColumn` sempre dependeu de
+`goToNextListPage` achar um botão de paginação clássico ("Rows 1-20 of
+X", setas `<`/`>`) pra ler o resto da lista além da primeira leva de
+linhas. Essa tela específica do ServiceNow é um widget Angular (Service
+Portal) — não usa paginação por botão, e sim carrega/renderiza mais
+linhas conforme a página é rolada (scroll infinito ou virtualização).
+Sem um botão de "próxima" pra clicar, `goToNextListPage` sempre devolvia
+`false` de cara, e a auditoria parava depois de ler só as linhas já
+renderizadas na carga inicial (16 de 39) — tratando as outras 23 como
+"faltando", quando na verdade só estavam invisíveis por nunca ter
+rolado a tela pra baixo.
+
+(Nota: existia uma tentativa antiga de resolver algo parecido —
+`growListUntilStable`, removida numa sessão anterior porque na época a
+causa raiz de um sintoma parecido era outra, colisão de chave de
+auditoria, não rolagem. Dessa vez a evidência é direta — contagem real
+no ServiceNow confirmada pelo usuário —, então a hipótese de rolagem
+voltou, mas com log explícito desta vez.)
+
+**Fix**: nova função `growVisibleRowsUntilStable(page, log)`, chamada
+antes de cada leitura de página em `scanDamageEntriesTableByColumn`.
+Rola até a última linha de qualquer `<table>` da tela (via
+`scrollIntoViewIfNeeded`, que funciona tanto pra rolagem da janela
+inteira quanto de um container interno) e reconta as linhas depois de
+cada rolagem — repete até a contagem parar de crescer por duas leituras
+seguidas (ou até um teto de segurança de 60 rolagens). Só depois disso
+`scanCurrentListPage` lê a página de verdade.
+
+Também adicionado log explícito em `goToNextListPage` quando nenhum
+controle de "próxima página" é encontrado, ou quando é encontrado mas
+desabilitado — antes esse caso ficava totalmente silencioso, sem pista
+nenhuma no log de qual dos dois motivos fez a auditoria parar de
+avançar.
+
+## Bug corrigido: "Type of failure is missing" não é exclusivo de vídeo — causava duplicata
+
+Reportado pelo usuário direto de um teste real: uma linha (DAM1119918)
+entrava no fluxo de desambiguação de vídeo (DF 45 + Failure Type "Type
+of failure is missing"), gastava os 15s inteiros de timeout tentando
+achar um anexo `.mp4` que nunca existiria, e nunca era marcada como já
+cadastrada — arriscando duplicata no reprocessamento seguinte.
+
+**Causa raiz**: o texto fixo "Type of failure is missing" NÃO é usado só
+pelas linhas de vídeo — `SnowMappings.FAILURE_TYPES` (Módulo 23) também
+mapeia vários defeitos de FOTO pro mesmo texto (`'Bonding paste
+failure'`, `'LPS Disconnected/Damaged'`, `'Damaged Laminate'`, entre
+outros — ver o mapeamento completo em `snowProcessor.ts`). Um desses
+defeitos de foto, caindo por coincidência em DF 45, bate nos dois
+critérios de `isVideoDf` e entra no fluxo de vídeo à toa — só que, sendo
+foto, nunca vai ter um anexo `.mp4` pra encontrar.
+
+**Fix**: `readRowAttachmentFilename` virou `readRowAttachmentKind`,
+que agora reconhece TRÊS resultados em vez de só vídeo-ou-nada:
+- `{ kind: 'video', filename }` — achou `.mp4`, desambigua o quadrante
+  normalmente (como já era).
+- `{ kind: 'photo' }` — achou anexo `.jpg`/`.jpeg`/`.png` em vez de
+  vídeo — confirma que é um defeito de foto comum, não vídeo. Marca
+  pela chave normal (`baseKey`, sem qualificação de Section/Area),
+  igual ao caminho não-vídeo — resolve rápido (assim que o anexo de
+  foto aparece), sem esperar os 15s inteiros de timeout.
+- `{ kind: 'unknown' }` — nem vídeo nem foto apareceram a tempo
+  (comportamento antigo) — continua conservador, não marca nada.
+
+## Feature: confirmação de upload de vídeo + retentativa automática (Fase 3)
+
+Pedido do usuário: depois de preencher os formulários de vídeo (Fase 3,
+cascata de abas), o robô deveria voltar e CONFERIR se cada upload de
+verdade terminou — não só se os campos foram preenchidos (isso é
+síncrono e sempre "dá certo") — e reprocessar sozinho qualquer vídeo
+cujo upload não confirmar, sem deixar nada pendente pra checagem manual
+depois. Motivação explícita: numa fila overnight, sem ninguém olhando,
+um upload que falha silenciosamente (rede lenta, timeout do ServiceNow)
+só seria percebido de manhã, abrindo aba por aba na mão.
+
+**Antes**: Fase 3 preenchia cada vídeo numa aba nova, disparava o
+upload sem esperar (`waitForVideoUpload=false`), contava como
+"preenchido" e seguia pro próximo — nunca verificava se o arquivo
+realmente terminou de subir.
+
+**Depois — duas passadas por rodada**:
+1. **3a (preenche)**: abre uma aba por vídeo da rodada, preenche e
+   dispara o upload de todas ANTES de conferir qualquer uma — preserva
+   o ganho de tempo da cascata (uploads correndo em paralelo enquanto
+   as próximas abas ainda estão sendo preenchidas).
+2. **3b (confere)**: só depois de abrir todas as abas da rodada, passa
+   por cada uma chamando a nova função `verifyVideoAttached(formPage,
+   expectedFilename, log)` — espera (até 180s, mesmo timeout de
+   `waitForAttachmentUploaded`) o nome do arquivo de vídeo aparecer
+   como anexo de verdade no formulário. Se não confirmar, descarta a
+   aba e marca a linha pra reprocessar.
+
+Linhas que não confirmaram voltam pra uma nova rodada de 3a+3b — até
+`MAX_VIDEO_ROUNDS = 3` no total, mesmo padrão de retentativa já usado
+na Fase 1 (Defeitos/Blanks). Como os dados já foram preenchidos pelo
+menos uma vez, reprocessar é seguro: se por acaso a linha tiver sido
+submetida por engano nesse meio tempo, a auditoria ao vivo do início da
+rodada seguinte já teria pego isso via `checkRowExistsInLiveTable`. Só
+depois de esgotadas as 3 rodadas um vídeo é finalmente reportado como
+falha de verdade (`videosFailed`) — o objetivo é que, ao fim da
+execução (individual ou overnight), nenhum vídeo fique num estado
+"talvez preenchido, talvez não" exigindo alguém abrir a aba pra
+descobrir.
+
+`videosFilled` mudou de significado: antes contava "formulário
+preenchido", agora conta "upload CONFIRMADO" — mais preciso, já que o
+upload em si é assíncrono e pode falhar sem gerar erro nenhum visível
+no preenchimento em si.
