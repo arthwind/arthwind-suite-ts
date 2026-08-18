@@ -918,6 +918,24 @@ class InspectionReportFiller extends ServiceNowFormFiller {
  * clica no resultado único. Selectors ainda não confirmados contra o ServiceNow
  * de verdade — mesmo processo iterativo já usado pro resto do Módulo 24 (ver
  * docs/snow-automation.md pra atualizações depois do primeiro teste real). */
+/** Espera um locator ficar visível tentando várias vezes com intervalo, em vez de
+ * uma única checagem — o portal do ServiceNow é um app Angular (Service Portal)
+ * que pode levar vários segundos pra renderizar de verdade mesmo depois do DOM
+ * "carregado" (`domcontentloaded`/`networkidle` não garantem que o Angular já
+ * bootou e desenhou os componentes). Mesmo padrão de paciência já usado em
+ * `openDamageEntryForm` (retry loop) pro resto do módulo. */
+async function waitVisibleWithRetry(
+  locator: ReturnType<Page['locator']>,
+  attempts: number = 12,
+  intervalMs: number = 1000
+): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    if (await locator.isVisible({ timeout: 1000 }).catch(() => false)) return true
+    await locator.page().waitForTimeout(intervalMs).catch(() => {})
+  }
+  return false
+}
+
 export async function findAndOpenIncident(
   page: Page,
   portalOrigin: string,
@@ -925,15 +943,16 @@ export async function findAndOpenIncident(
   log: LogFn
 ): Promise<boolean> {
   await page.goto(portalOrigin, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-  await page.waitForTimeout(1000)
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(1500)
 
   const tile = page.getByText(/my inspection reports/i).first()
-  if (await tile.isVisible({ timeout: 5000 }).catch(() => false)) {
+  if (await waitVisibleWithRetry(tile)) {
     await tile.click({ force: true }).catch(() => {})
-    await page.waitForLoadState('domcontentloaded').catch(() => {})
-    await page.waitForTimeout(1200)
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(1500)
   } else {
-    log(`  ⚠ Não achou o tile "My Inspection Reports" na home do portal — tentando seguir mesmo assim.`)
+    log(`  ⚠ Não achou o tile "My Inspection Reports" na home do portal (esperou ~12s) — tentando seguir mesmo assim.`)
   }
 
   const searchBox = page
@@ -941,21 +960,22 @@ export async function findAndOpenIncident(
     .or(page.locator('input[type="search"]'))
     .first()
 
-  if (!(await searchBox.isVisible({ timeout: 5000 }).catch(() => false))) {
-    log(`  ⚠ Não achou a caixa de busca "Keyword Search" na lista "Technical Incidents".`)
+  if (!(await waitVisibleWithRetry(searchBox))) {
+    log(`  ⚠ Não achou a caixa de busca "Keyword Search" na lista "Technical Incidents" (esperou ~12s).`)
     return false
   }
   await searchBox.fill(incNumber)
   await searchBox.press('Enter').catch(() => {})
-  await page.waitForTimeout(1500)
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+  await page.waitForTimeout(1000)
 
   const resultLink = page.getByText(incNumber, { exact: true }).first()
-  if (!(await resultLink.isVisible({ timeout: 5000 }).catch(() => false))) {
-    log(`  ⚠ INC "${incNumber}" não apareceu na busca de Technical Incidents.`)
+  if (!(await waitVisibleWithRetry(resultLink))) {
+    log(`  ⚠ INC "${incNumber}" não apareceu na busca de Technical Incidents (esperou ~12s).`)
     return false
   }
   await resultLink.click({ force: true }).catch(() => {})
-  await page.waitForLoadState('domcontentloaded').catch(() => {})
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
   await page.waitForTimeout(1500)
   return true
 }

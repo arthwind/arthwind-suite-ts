@@ -1433,3 +1433,27 @@ distinção nenhuma.
   REALMENTE pendente (não a linha 1 da planilha, que podia já estar
   enviada) — testar numa já enviada só validaria o caminho "Show
   Inspection Report", não o preenchimento de verdade.
+
+## Bug corrigido: `findAndOpenIncident` não esperava o portal Angular renderizar
+
+Primeiro teste real: nem o tile "My Inspection Reports" nem a caixa de
+busca "Keyword Search" foram encontrados — as duas checagens falharam
+quase instantaneamente, sem dar tempo nenhum da página carregar de
+verdade.
+
+**Causa raiz**: `page.goto(portalOrigin, { waitUntil: 'domcontentloaded' })`
++ 1 segundo fixo de espera, seguido de UMA checagem `isVisible({timeout:
+5000})` — mas o portal do ServiceNow é um app Angular (Service Portal),
+que pode levar bem mais que isso pra bootar e desenhar os componentes de
+verdade (o DOM "carrega" antes do Angular sequer começar a rodar). Mesmo
+padrão de causa raiz já visto antes na lista "Damage Report Entries"
+(ver seção "Bug corrigido: auditoria via Modo Auditoria... só rolagem" —
+componente Angular, timing imprevisível).
+
+**Fix**: nova função `waitVisibleWithRetry(locator, attempts=12,
+intervalMs=1000)` — tenta achar o elemento várias vezes com intervalo
+(até ~12s), em vez de uma única checagem. Aplicada nas 3 esperas de
+`findAndOpenIncident` (tile, caixa de busca, resultado da pesquisa).
+Também trocado `domcontentloaded` por `networkidle` nos `waitForLoadState`
+depois de cada navegação/clique, mesmo padrão de paciência já usado em
+`openDamageEntryForm` pro resto do módulo.
