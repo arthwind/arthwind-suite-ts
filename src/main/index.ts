@@ -56,7 +56,9 @@ import {
   openServiceNowForLogin,
   closeServiceNowSession,
   runSnowDamageAutomation,
-  getSpreadsheetBlades
+  getSpreadsheetBlades,
+  readTurbineIncList,
+  runInspectionReportPhase
 } from './services/snowAutomation'
 
 
@@ -502,6 +504,26 @@ app.whenReady().then(() => {
       options: { headless?: boolean; startRow?: number; endRow?: number; selectedBlades?: string[] }
     ) => {
       return runSnowDamageAutomation(excelPath, incidentUrl, options, (msg: string) => {
+        event.sender.send('snow_automation_log', { msg })
+      })
+    }
+  )
+
+  // ─── SNOW Automation — Fase 0 (Create Inspection Report) ──────────────────────
+  ipcMain.handle('snow_read_turbine_inc_list', async (_event, xlsxPath: string) => {
+    return readTurbineIncList(xlsxPath)
+  })
+
+  ipcMain.handle(
+    'snow_inspection_report_run',
+    async (
+      event,
+      controlXlsxPath: string,
+      portalOrigin: string,
+      technician: string,
+      options: { headless?: boolean; onlyIncNumbers?: string[] }
+    ) => {
+      return runInspectionReportPhase(controlXlsxPath, portalOrigin, technician, options, (msg: string) => {
         event.sender.send('snow_automation_log', { msg })
       })
     }

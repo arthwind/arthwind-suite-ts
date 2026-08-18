@@ -68,6 +68,8 @@ export interface BladeInfo {
   setNumber: string | null
 }
 
+export type { BladeSetEntry }
+
 /** Retorna o Set Number pro Blade SN dado, ou null se não achar na lista. */
 export function getSetNumber(bladeSn: string | number): string | null {
   const key = String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
@@ -85,5 +87,20 @@ export function getBladeInfo(bladeSn: string | number): BladeInfo {
     serial: match?.serial ?? null,
     setNumber: match?.setNumber ?? null,
   }
+}
+
+/** Retorna as (normalmente 3) pás de uma turbina, pelo código WTG (ex.: "VSR03-01") —
+ * usa `turbinePrefix`, não `turbine` (que na lista vem como uma string combinada
+ * "VSR03-01-90626", não só o código WTG). Ordenada por `component` ("Rotor blade
+ * 1/2/3"), que ordena lexicograficamente igual à ordem numérica aqui (1, 2, 3) —
+ * assume-se Rotor blade 1→Blade A, 2→Blade B, 3→Blade C no formulário do
+ * ServiceNow (a ordem real ainda precisa ser confirmada rodando contra o
+ * ServiceNow de verdade). */
+export function getBladesForTurbine(wtg: string): BladeSetEntry[] {
+  const key = wtg.trim()
+  const entries = loadBladeSets()
+  return entries
+    .filter((e) => e.turbinePrefix === key)
+    .sort((a, b) => (a.component || '').localeCompare(b.component || ''))
 }
 

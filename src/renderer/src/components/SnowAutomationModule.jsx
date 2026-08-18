@@ -21,6 +21,12 @@ export default function SnowAutomationModule({ D }) {
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
 
+  // ── Fase 0: Create Inspection Report (etapa anterior ao Damage Report Entry) ──
+  const [controlXlsxPath, setControlXlsxPath] = useState('');
+  const [portalOrigin, setPortalOrigin] = useState('');
+  const [technician, setTechnician] = useState('');
+  const [runningInspectionPhase, setRunningInspectionPhase] = useState(false);
+
 
   const [blades, setBlades] = useState([]);
   const [selectedBlades, setSelectedBlades] = useState([]);
@@ -30,7 +36,7 @@ export default function SnowAutomationModule({ D }) {
   const [queue, setQueue] = useState([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const [queueIndex, setQueueIndex] = useState(-1);
-  const busy = running || queueRunning;
+  const busy = running || queueRunning || runningInspectionPhase;
   const [ran, setRan] = useState(false);
   const [logs, setLogs] = useState([]);
   const [result, setResult] = useState(null);
@@ -93,6 +99,55 @@ export default function SnowAutomationModule({ D }) {
   const pickPhotosDir = async () => {
     const picked = await window.pywebview.api.pick_folder();
     if (picked) setLocalPhotosDir(picked);
+  };
+
+  const pickControlXlsx = async () => {
+    const picked = await window.pywebview.api.pick_file('xlsx');
+    if (picked) setControlXlsxPath(picked);
+  };
+
+  // onlyFirst=true testa só a 1ª turbina da planilha de controle — pensado pra
+  // conferir visualmente (headless desligado) antes de rodar a planilha inteira,
+  // já que os seletores dessa etapa nova ainda não foram confirmados contra o
+  // ServiceNow de verdade.
+  const handleRunInspectionPhase = async (onlyFirst) => {
+    if (!controlXlsxPath || !portalOrigin.trim() || !technician.trim()) return;
+    setRunningInspectionPhase(true);
+    setLogs((prev) => [...prev, {
+      text: onlyFirst
+        ? '▶ Fase 0 (Inspection Report) — testando só a 1ª turbina da planilha de controle...'
+        : '▶ Fase 0 (Inspection Report) — rodando a planilha de controle inteira...',
+      type: 'info'
+    }]);
+    try {
+      let onlyIncNumbers;
+      if (onlyFirst) {
+        const list = await window.pywebview.api.snow_read_turbine_inc_list(controlXlsxPath);
+        if (!list.success || list.entries.length === 0) {
+          setLogs((prev) => [...prev, { text: `✗ Falha ao ler a planilha de controle: ${list.error || 'nenhuma turbina encontrada'}`, type: 'error' }]);
+          return;
+        }
+        onlyIncNumbers = [list.entries[0].incNumber];
+      }
+      const res = await window.pywebview.api.snow_inspection_report_run(
+        controlXlsxPath,
+        portalOrigin.trim(),
+        technician.trim(),
+        { headless, ...(onlyIncNumbers ? { onlyIncNumbers } : {}) }
+      );
+      if (res.success) {
+        setLogs((prev) => [...prev, {
+          text: `✓ Fase 0 concluída: ${res.processed} ok, ${res.failed} falha(s).`,
+          type: res.failed > 0 ? 'warning' : 'success'
+        }]);
+      } else {
+        setLogs((prev) => [...prev, { text: `✗ Falha: ${res.error}`, type: 'error' }]);
+      }
+    } catch (err) {
+      setLogs((prev) => [...prev, { text: `Erro crítico: ${err.message || err}`, type: 'error' }]);
+    } finally {
+      setRunningInspectionPhase(false);
+    }
   };
 
   const toggleBlade = (sn) => {
@@ -307,6 +362,95 @@ export default function SnowAutomationModule({ D }) {
           lineHeight: '1.5'
         }}>
           Upload de fotos aprimorado: envia automaticamente as 2 fotos do Módulo 23 (pic1 com polígono desenhado + pic2 regional) da pasta local.
+        </div>
+
+        {/* Fase 0 — Create Inspection Report (etapa anterior, opcional) */}
+        <div style={{
+          border: `1px solid ${D.borderLight}`,
+          borderRadius: '8px',
+          padding: '10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: D.textPrimary }}>
+            Fase 0 — Create Inspection Report
+          </div>
+          <div style={{ fontSize: '10.5px', color: D.textMuted, lineHeight: '1.4' }}>
+            Garante que o Inspection Report de cada turbina existe e está submetido
+            (etapa anterior ao cadastro de defeitos abaixo). Ainda em teste — recomendado
+            rodar "Testar 1ª turbina" com o navegador visível antes de rodar a planilha inteira.
+          </div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <div className="field-label" style={{ color: D.textMuted }}>Planilha de controle (Turbina/INC/Data Coleta)</div>
+            <div
+              className={`input-field${controlXlsxPath ? " filled" : ""}`}
+              onClick={!busy ? pickControlXlsx : undefined}
+              style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
+            >
+              <span style={{ color: controlXlsxPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+              <span className="input-field-text" title={controlXlsxPath || 'Selecione o arquivo .xlsx'}>
+                {controlXlsxPath ? controlXlsxPath.split('\\').pop() : 'Selecione o arquivo .xlsx'}
+              </span>
+            </div>
+          </div>
+
+          <input
+            type="text"
+            placeholder="URL do portal ServiceNow (ex: https://empresa.service-now.com)"
+            value={portalOrigin}
+            onChange={(e) => setPortalOrigin(e.target.value)}
+            disabled={busy}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
+          />
+          <input
+            type="text"
+            placeholder="Responsible technicians (seu nome)"
+            value={technician}
+            onChange={(e) => setTechnician(e.target.value)}
+            disabled={busy}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
+          />
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => handleRunInspectionPhase(true)}
+              disabled={busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()}
+              style={{
+                flex: 1,
+                background: D.bgCard,
+                border: `1px solid ${D.borderLight}`,
+                color: D.textPrimary,
+                borderRadius: '8px',
+                padding: '8px',
+                fontSize: '11.5px',
+                fontWeight: 500,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: (busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
+              }}
+            >
+              Testar 1ª turbina
+            </button>
+            <button
+              onClick={() => handleRunInspectionPhase(false)}
+              disabled={busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()}
+              style={{
+                flex: 1,
+                background: accent,
+                border: `1px solid ${accent}`,
+                color: '#fff',
+                borderRadius: '8px',
+                padding: '8px',
+                fontSize: '11.5px',
+                fontWeight: 500,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: (busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
+              }}
+            >
+              Rodar planilha inteira
+            </button>
+          </div>
         </div>
 
         {/* Planilha */}

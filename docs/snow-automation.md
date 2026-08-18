@@ -1304,3 +1304,97 @@ descobrir.
 preenchido", agora conta "upload CONFIRMADO" — mais preciso, já que o
 upload em si é assíncrono e pode falhar sem gerar erro nenhum visível
 no preenchimento em si.
+
+## Feature (em teste): Fase 0 — Create Inspection Report
+
+Pedido do usuário: estender a automação pra cobrir a etapa ANTES do
+Damage Report Entry — o INC já vem criado de antemão pela NAWP, mas
+existe um formulário de cabeçalho da inspeção ("Create Inspection
+Report", separado do cadastro de danos) que precisa existir e estar
+submetido antes da tela de Damage Report Entries ficar acessível. Hoje
+isso é preenchido na mão; a ideia é rodar do início ao fim sem
+intervenção manual, exceto o nome de quem está rodando (sempre
+variável).
+
+Mapeamento de dados fechado em conversa com o usuário (screenshots do
+fluxo real do ServiceNow + PDF/planilha de controle da campanha):
+
+**Fixos pra toda a campanha** (`INSPECTION_REPORT_FIXED` em
+`snowAutomation.ts`): Access method = "Visual inspection: Other",
+Blade type = "NR81.5" (não "NR81.5 - AI-D", que também existe no
+dropdown), Purchase Order = "0000000014", Blade manufacturing location
+= vazio, único checkbox marcado = "Safety checklist read and
+followed" (drain hole A/B/C, ruído atípico, peças soltas, vácuo,
+"Blade Inside Inspection completed?" ficam desmarcados).
+
+**Por turbina, via `blade_sets.json`** — nova função
+`getBladesForTurbine(wtg)` em `bladeSets.ts`: filtra por
+`turbinePrefix` (não por `turbine`, que na lista vem como uma string
+combinada tipo "VSR03-01-90626") e ordena por `component` ("Rotor
+blade 1/2/3" — assume-se 1→Blade A, 2→Blade B, 3→Blade C; ordem ainda
+não confirmada contra o formulário real). Cobre Blade A/B/C serial
+number E Blade set number (os 4 últimos dígitos do serial, mesmo valor
+pras 3 pás) numa chamada só.
+
+**Por turbina, via planilha de controle** — nova função
+`readTurbineIncList(xlsxPath)`: lê a planilha "Status Envio ServiceNOW
+- <cliente>.xlsx" (aba "Turbinas"), colunas WTG/Turbina ID/INC
+(SNOW)/Data Coleta nas 4 primeiras posições. `Data Coleta` alimenta
+"Inspection Start Date" — reformatada de `Date` do ExcelJS pra
+DD/MM/YYYY quando a célula vem como data de verdade (não texto).
+
+**Runtime**: "Responsible technicians" — digitado por quem roda, nunca
+vem de arquivo.
+
+### Peças novas
+
+- `ServiceNowFormFiller` — classe base extraída de `DamageEntryFiller`
+  (que virou `DamageEntryFiller extends ServiceNowFormFiller`), com
+  `selectFromComboBox`/`fillText`/`getScope` (já existiam) mais dois
+  métodos novos: `setCheckbox(fieldLabel, checked)` e `submitForm()`
+  (também extraído do bloco de submit que só existia dentro de
+  `DamageEntryFiller.fill`). Motivo: o Inspection Report usa os mesmos
+  widgets Select2/checkbox/submit do ServiceNow — sem essa extração
+  seria ~150 linhas de lógica de combobox duplicadas.
+- `InspectionReportFiller extends ServiceNowFormFiller` — preenche e
+  submete o formulário novo com o mapeamento acima.
+- `findAndOpenIncident(page, portalOrigin, incNumber, log)` — navega
+  portal → tile "My Inspection Reports" → lista "Technical Incidents"
+  → pesquisa → clica no resultado.
+- `detectInspectionReportState(page, log)` — devolve `'create' |
+  'show' | 'unknown'` lendo qual botão de Ações aparece.
+- `ensureInspectionReport(page, portalOrigin, entry, technician, log)`
+  — orquestra as duas funções acima + o preenchimento, pra 1 turbina.
+- `runInspectionReportPhase(controlXlsxPath, portalOrigin, technician,
+  options, log)` — lê a planilha de controle inteira (ou um filtro por
+  `onlyIncNumbers`, pra testar com 1 turbina) e roda
+  `ensureInspectionReport` pra cada uma, uma aba por vez.
+
+### IPC + UI
+
+Novos canais: `snow_read_turbine_inc_list` (preview da planilha de
+controle) e `snow_inspection_report_run` (roda a Fase 0). Nova seção
+"Fase 0 — Create Inspection Report" no topo do painel esquerdo de
+`SnowAutomationModule.jsx`: seletor da planilha de controle, campo de
+URL do portal, campo "Responsible technicians", e dois botões —
+"Testar 1ª turbina" (só a primeira linha da planilha, pensado pra
+conferir visualmente antes de rodar tudo) e "Rodar planilha inteira".
+
+### Ainda não confirmado contra o ServiceNow real
+
+Implementado e com typecheck limpo, mas **nenhum seletor foi
+confirmado rodando contra o ServiceNow de verdade ainda** — mesmo
+processo iterativo que todo o resto do Módulo 24 passou (selectors
+"prováveis" primeiro, corrigidos depois do primeiro teste real):
+
+- Texto/seletor exato dos botões "Create Inspection Report" / "Show
+  Inspection Report" e do tile "My Inspection Reports" na home do
+  portal.
+- Se existe uma URL estável pra pular direto pra "Technical Incidents"
+  (evitaria o clique a cada turbina).
+- Se o campo "Inspection Start Date" aceita digitação direta no
+  formato DD/MM/YYYY ou exige o date picker.
+- Ordem real de "Rotor blade 1/2/3" → "Blade A/B/C" no formulário.
+
+Próximo passo: rodar "Testar 1ª turbina" com o navegador visível
+(headless desligado) contra um INC real e corrigir o que não bater.

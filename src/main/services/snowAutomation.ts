@@ -20,6 +20,7 @@ import https from 'https'
 import http from 'http'
 import sharp from 'sharp'
 import { SnowMappings } from './snowProcessor'
+import { getBladesForTurbine } from './bladeSets'
 
 export interface DamageReportRow {
   bladeSerialNumber: string // serial completo (13 dígitos) — bate com o combobox
@@ -138,15 +139,20 @@ export async function ensureBlankImageFile(localPhotosDir?: string): Promise<str
 
 // ─── Preenchimento do formulário ─────────────────────────────────────────────
 
-
-class DamageEntryFiller {
+/** Base compartilhada entre todo formulário do ServiceNow que a automação preenche
+ * (Create Damage Report Entry, Create Inspection Report, ...) — o widget de
+ * combobox custom (Select2/sn-select), campo de texto por label e checkbox por
+ * label se comportam do mesmo jeito nos dois formulários; só os campos em si e o
+ * que fazer com eles muda por formulário. Extraída de `DamageEntryFiller` (era só
+ * dele até a automação do Inspection Report existir). */
+class ServiceNowFormFiller {
   constructor(
-    private page: Page,
-    private log: LogFn
+    protected page: Page,
+    protected log: LogFn
   ) {}
 
   /** Retorna a página principal ou o iframe gsft_main do ServiceNow se ele existir */
-  private getScope() {
+  protected getScope() {
     const mainFrame = this.page.frames().find((f) => f.name() === 'gsft_main' || f.url().includes('.do'))
     return mainFrame || this.page
   }
@@ -155,7 +161,7 @@ class DamageEntryFiller {
    * selecionado) — usada por `selectFromComboBox` pra CONFERIR se o clique realmente
    * selecionou o valor certo, em vez de assumir que "clicou em algo" = "selecionou o
    * valor certo". */
-  private async readComboBoxValue(fieldLabel: string): Promise<string> {
+  protected async readComboBoxValue(fieldLabel: string): Promise<string> {
     const scope = this.getScope()
     const candidates = [
       scope.locator('.select2-container').filter({ has: scope.getByText(fieldLabel, { exact: false }) }).locator('.select2-chosen, .select2-choice').first(),
@@ -184,7 +190,7 @@ class DamageEntryFiller {
    * de clicar, LÊ DE VOLTA o que ficou selecionado e compara com o que devia ser; se
    * não bater, tenta mais uma vez do zero, e se ainda assim não bater, FALHA a linha
    * com um erro claro em vez de seguir preenchendo com dado errado. */
-  private async selectFromComboBox(
+  protected async selectFromComboBox(
     fieldLabel: string,
     optionText: string,
     waitAfterMs: number = 600
@@ -313,7 +319,7 @@ class DamageEntryFiller {
     }
   }
 
-  private async fillText(fieldLabel: string, value: string | number): Promise<void> {
+  protected async fillText(fieldLabel: string, value: string | number): Promise<void> {
     const scope = this.getScope()
     const locators = [
       scope.getByLabel(fieldLabel, { exact: false }).first(),
@@ -335,7 +341,73 @@ class DamageEntryFiller {
     await primary.fill(String(value)).catch(() => {})
   }
 
+  /** Marca/desmarca um checkbox pelo texto do label — mesmo padrão já usado em
+   * `addOptionalFields` pro checkbox "Set Optional Fields", generalizado. Não faz
+   * nada se já estiver no estado pedido (evita clique duplo que às vezes reabre um
+   * painel client-side do ServiceNow). */
+  protected async setCheckbox(fieldLabel: string, checked: boolean = true): Promise<void> {
+    const scope = this.getScope()
+    const checkbox = scope
+      .locator('label', { hasText: fieldLabel })
+      .locator('input[type="checkbox"]')
+      .or(scope.getByLabel(fieldLabel, { exact: false }))
+      .first()
 
+    const visible = await checkbox.isVisible({ timeout: 2000 }).catch(() => false)
+    if (!visible) {
+      this.log(`  ⚠ Checkbox [${fieldLabel}] não encontrado — pulando.`)
+      return
+    }
+
+    const isChecked = await checkbox.isChecked().catch(() => false)
+    if (isChecked === checked) return
+
+    if (checked) {
+      await checkbox.check({ force: true }).catch(async () => {
+        await checkbox.click({ force: true })
+      })
+    } else {
+      await checkbox.uncheck({ force: true }).catch(async () => {
+        await checkbox.click({ force: true })
+      })
+    }
+    this.log(`  ${checked ? '✓' : '·'} Checkbox [${fieldLabel}] ${checked ? 'marcado' : 'desmarcado'}.`)
+  }
+
+  /** Clica no botão de submissão do formulário (Submit/Save/Insert, PT ou EN) —
+   * mesma cascata de seletores que já era usada só dentro de `DamageEntryFiller.fill`,
+   * generalizada pra qualquer formulário. Devolve se achou e clicou em algum botão. */
+  protected async submitForm(): Promise<boolean> {
+    const scope = this.getScope()
+    const submitBtnLocators = [
+      scope.getByRole('button', { name: /^submit$/i }),
+      scope.getByRole('button', { name: /^save$/i }),
+      scope.getByRole('button', { name: /^insert$/i }),
+      scope.getByRole('button', { name: /^salvar$/i }),
+      scope.getByRole('button', { name: /submit|insert|salvar|gravar/i })
+    ]
+
+    for (const btn of submitBtnLocators) {
+      try {
+        if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await btn.click()
+          return true
+        }
+      } catch {
+        /* tenta próximo */
+      }
+    }
+
+    const fallback = scope.getByRole('button', { name: /submit|save|insert|salvar/i }).first()
+    if (await fallback.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await fallback.click()
+      return true
+    }
+    return false
+  }
+}
+
+class DamageEntryFiller extends ServiceNowFormFiller {
   private buildPhotoBaseName(data: DamageReportRow): string {
     const shortSn = extractBladeSn(data.bladeSerialNumber)
     const paddedBladeSn = String(shortSn).replace(/^B/i, '').padStart(4, '0')
@@ -727,31 +799,9 @@ class DamageEntryFiller {
     // Submissão do formulário: somente realizada se autoSubmit for true
     if (autoSubmit) {
       this.log(`  Submetendo formulário...`)
-      const scope = this.getScope()
-      const submitBtnLocators = [
-        scope.getByRole('button', { name: /^submit$/i }),
-        scope.getByRole('button', { name: /^save$/i }),
-        scope.getByRole('button', { name: /^insert$/i }),
-        scope.getByRole('button', { name: /^salvar$/i }),
-        scope.getByRole('button', { name: /submit|insert|salvar|gravar/i })
-      ]
-
-      let submitted = false
-      for (const btn of submitBtnLocators) {
-        try {
-          if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
-            await btn.click()
-            submitted = true
-            break
-          }
-        } catch {
-          /* tenta próximo */
-        }
-      }
-
+      const submitted = await this.submitForm()
       if (!submitted) {
-        const fallback = scope.getByRole('button', { name: /submit|save|insert|salvar/i }).first()
-        await fallback.click()
+        throw new Error('Não achou nenhum botão de Submit/Save/Insert visível pra clicar.')
       }
 
       await this.page.waitForLoadState('networkidle').catch(() => {})
@@ -772,6 +822,306 @@ class DamageEntryFiller {
 
 
 
+}
+
+// ─── Fase 0: "Create Inspection Report" — etapa anterior ao Damage Report Entry ──
+// Cada INC (já criado de antemão pela NAWP) precisa desse cabeçalho de inspeção
+// preenchido e submetido ANTES da tela de Damage Report Entries ficar acessível.
+// Mapeamento de campos fechado com o usuário — ver docs/snow-automation.md.
+
+/** Dados de uma pá pro Inspection Report — só o que o formulário usa (serial
+ * completo de 13 dígitos). `null` quando a pá não foi achada em `blade_sets.json`
+ * (turbina ainda não cadastrada na lista, ou só tem 1-2 pás nela). */
+export interface InspectionReportBladeData {
+  serial: string | null
+}
+
+export interface InspectionReportData {
+  technician: string // digitado por quem roda — sempre variável, nunca vem de arquivo
+  inspectionStartDate: string // DD/MM/YYYY — igual ao formato do campo no formulário
+  bladeA: InspectionReportBladeData
+  bladeB: InspectionReportBladeData
+  bladeC: InspectionReportBladeData
+  bladeSetNumber: string | null // os 4 últimos dígitos do serial — mesmo pras 3 pás
+}
+
+/** Monta `InspectionReportData` pra uma turbina a partir de `blade_sets.json`
+ * (via `getBladesForTurbine`) + os dados já lidos da planilha de controle. Não
+ * precisa de nada além do WTG e da Data Coleta — os seriais e o Set Number vêm
+ * todos da lista de pás. */
+export function buildInspectionReportData(
+  wtg: string,
+  dataColeta: string,
+  technician: string
+): InspectionReportData {
+  const blades = getBladesForTurbine(wtg)
+  const [a, b, c] = blades
+  return {
+    technician,
+    inspectionStartDate: dataColeta,
+    bladeA: { serial: a?.serial ?? null },
+    bladeB: { serial: b?.serial ?? null },
+    bladeC: { serial: c?.serial ?? null },
+    bladeSetNumber: blades[0]?.setNumber ?? null
+  }
+}
+
+/** Valores fixos pra toda a campanha, fechados com o usuário — não variam por
+ * turbina nem precisam de fonte de dado nenhuma. */
+const INSPECTION_REPORT_FIXED = {
+  accessMethod: 'Visual inspection: Other',
+  bladeType: 'NR81.5', // NÃO "NR81.5 - AI-D" — tem os dois valores no dropdown
+  purchaseOrder: '0000000014'
+}
+
+class InspectionReportFiller extends ServiceNowFormFiller {
+  async fill(data: InspectionReportData): Promise<boolean> {
+    this.log(`Preenchendo Inspection Report — technician: ${data.technician}, data: ${data.inspectionStartDate}`)
+
+    await this.setCheckbox('Safety checklist read and followed', true)
+    await this.fillText('Responsible technicians', data.technician)
+    await this.fillText('Inspection Start Date', data.inspectionStartDate)
+    await this.selectFromComboBox('Access method', INSPECTION_REPORT_FIXED.accessMethod, 800)
+    await this.selectFromComboBox('Blade type', INSPECTION_REPORT_FIXED.bladeType, 800)
+    await this.fillText('Purchase Order', INSPECTION_REPORT_FIXED.purchaseOrder)
+
+    if (data.bladeA.serial) await this.fillText('Blade A serial number', data.bladeA.serial)
+    else this.log(`  ⚠ Blade A não encontrada em blade_sets.json — campo deixado como estava.`)
+    if (data.bladeB.serial) await this.fillText('Blade B serial number', data.bladeB.serial)
+    else this.log(`  ⚠ Blade B não encontrada em blade_sets.json — campo deixado como estava.`)
+    if (data.bladeC.serial) await this.fillText('Blade C serial number', data.bladeC.serial)
+    else this.log(`  ⚠ Blade C não encontrada em blade_sets.json — campo deixado como estava.`)
+
+    if (data.bladeSetNumber) {
+      await this.fillText('Blade set number', data.bladeSetNumber)
+    } else {
+      this.log(`  ⚠ Blade set number não encontrado em blade_sets.json — campo deixado como estava.`)
+    }
+
+    // Blade manufacturing location fica vazio de propósito (fixo pra campanha) —
+    // nenhuma chamada de preenchimento pra esse campo.
+
+    const submitted = await this.submitForm()
+    if (submitted) {
+      await this.page.waitForLoadState('networkidle').catch(() => {})
+      await this.page.waitForTimeout(1000)
+      this.log(`  ✓ Inspection Report submetido.`)
+    } else {
+      this.log(`  ✗ Não achou o botão Submit do Inspection Report.`)
+    }
+    return submitted
+  }
+}
+
+/** Navega até a tela do INC: portal (mesma origem de `incidentUrl`) → tile "My
+ * Inspection Reports" → lista "Technical Incidents" com busca → pesquisa o INC →
+ * clica no resultado único. Selectors ainda não confirmados contra o ServiceNow
+ * de verdade — mesmo processo iterativo já usado pro resto do Módulo 24 (ver
+ * docs/snow-automation.md pra atualizações depois do primeiro teste real). */
+export async function findAndOpenIncident(
+  page: Page,
+  portalOrigin: string,
+  incNumber: string,
+  log: LogFn
+): Promise<boolean> {
+  await page.goto(portalOrigin, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+  await page.waitForTimeout(1000)
+
+  const tile = page.getByText(/my inspection reports/i).first()
+  if (await tile.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await tile.click({ force: true }).catch(() => {})
+    await page.waitForLoadState('domcontentloaded').catch(() => {})
+    await page.waitForTimeout(1200)
+  } else {
+    log(`  ⚠ Não achou o tile "My Inspection Reports" na home do portal — tentando seguir mesmo assim.`)
+  }
+
+  const searchBox = page
+    .getByPlaceholder(/keyword search/i)
+    .or(page.locator('input[type="search"]'))
+    .first()
+
+  if (!(await searchBox.isVisible({ timeout: 5000 }).catch(() => false))) {
+    log(`  ⚠ Não achou a caixa de busca "Keyword Search" na lista "Technical Incidents".`)
+    return false
+  }
+  await searchBox.fill(incNumber)
+  await searchBox.press('Enter').catch(() => {})
+  await page.waitForTimeout(1500)
+
+  const resultLink = page.getByText(incNumber, { exact: true }).first()
+  if (!(await resultLink.isVisible({ timeout: 5000 }).catch(() => false))) {
+    log(`  ⚠ INC "${incNumber}" não apareceu na busca de Technical Incidents.`)
+    return false
+  }
+  await resultLink.click({ force: true }).catch(() => {})
+  await page.waitForLoadState('domcontentloaded').catch(() => {})
+  await page.waitForTimeout(1500)
+  return true
+}
+
+export type InspectionReportState = 'create' | 'show' | 'unknown'
+
+/** Lê qual botão de Ações aparece na tela do INC — decide se precisa preencher o
+ * Inspection Report do zero ("create") ou se já existe e só falta abrir ("show"). */
+export async function detectInspectionReportState(page: Page, log: LogFn): Promise<InspectionReportState> {
+  const scopes = [page, ...page.frames()]
+  for (const s of scopes) {
+    const createBtn = s.getByRole('button', { name: /create inspection report/i }).or(
+      s.getByRole('link', { name: /create inspection report/i })
+    )
+    if (await createBtn.first().isVisible({ timeout: 2000 }).catch(() => false)) {
+      return 'create'
+    }
+    const showBtn = s.getByRole('button', { name: /show inspection report/i }).or(
+      s.getByRole('link', { name: /show inspection report/i })
+    )
+    if (await showBtn.first().isVisible({ timeout: 2000 }).catch(() => false)) {
+      return 'show'
+    }
+  }
+  log(`  ⚠ Não achou nem "Create Inspection Report" nem "Show Inspection Report" na tela do INC.`)
+  return 'unknown'
+}
+
+/** Clica no botão certo ("Create Inspection Report" ou "Show Inspection Report",
+ * conforme `state`) e espera a navegação assentar. */
+async function clickInspectionReportButton(page: Page, state: 'create' | 'show', log: LogFn): Promise<boolean> {
+  const label = state === 'create' ? /create inspection report/i : /show inspection report/i
+  const scopes = [page, ...page.frames()]
+  for (const s of scopes) {
+    const btn = s.getByRole('button', { name: label }).or(s.getByRole('link', { name: label })).first()
+    if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await btn.click({ force: true }).catch(() => {})
+      await page.waitForLoadState('domcontentloaded').catch(() => {})
+      await page.waitForTimeout(1500)
+      return true
+    }
+  }
+  log(`  ⚠ Não achou o botão "${state === 'create' ? 'Create' : 'Show'} Inspection Report" pra clicar.`)
+  return false
+}
+
+/** Fase 0 completa: garante que o Inspection Report da turbina existe e está
+ * submetido antes do resto do pipeline (Damage Report Entries) começar. Devolve
+ * `false` se não conseguiu (o chamador decide se aborta essa turbina ou segue
+ * mesmo assim). */
+export async function ensureInspectionReport(
+  page: Page,
+  portalOrigin: string,
+  entry: TurbineIncEntry,
+  technician: string,
+  log: LogFn
+): Promise<boolean> {
+  const found = await findAndOpenIncident(page, portalOrigin, entry.incNumber, log)
+  if (!found) return false
+
+  const state = await detectInspectionReportState(page, log)
+  if (state === 'unknown') return false
+
+  const clicked = await clickInspectionReportButton(page, state, log)
+  if (!clicked) return false
+
+  if (state === 'show') {
+    log(`  ✓ Inspection Report de ${entry.wtg} (${entry.incNumber}) já existia — nada a preencher.`)
+    return true
+  }
+
+  const data = buildInspectionReportData(entry.wtg, entry.dataColeta, technician)
+  const filler = new InspectionReportFiller(page, log)
+  return filler.fill(data)
+}
+
+export interface InspectionReportRunOptions {
+  headless?: boolean
+  // Filtro opcional — só processa esses números de INC. Pensado pra testar com 1
+  // turbina antes de rodar a planilha de controle inteira (ver seção Verificação
+  // do plano) sem precisar de um arquivo separado só com 1 linha.
+  onlyIncNumbers?: string[]
+}
+
+export interface InspectionReportRunResult {
+  success: boolean
+  processed: number
+  failed: number
+  errors: string[]
+  error?: string
+}
+
+/** Fase 0 completa: lê a planilha de controle inteira (ou um filtro dela) e roda
+ * `ensureInspectionReport` pra cada turbina, uma aba por vez. Não abre a fila
+ * overnight nem o resto do pipeline de Damage Report Entries — só garante que o
+ * Inspection Report de cada turbina existe e está submetido. */
+export async function runInspectionReportPhase(
+  controlXlsxPath: string,
+  portalOrigin: string,
+  technician: string,
+  options: InspectionReportRunOptions,
+  log_fn?: LogFn
+): Promise<InspectionReportRunResult> {
+  const log = log_fn || (() => {})
+  const { success, entries, error } = await readTurbineIncList(controlXlsxPath)
+  if (!success) {
+    return { success: false, processed: 0, failed: 0, errors: [], error: error || 'Falha ao ler a planilha de controle.' }
+  }
+
+  let filtered = entries
+  if (options.onlyIncNumbers && options.onlyIncNumbers.length > 0) {
+    const wanted = new Set(options.onlyIncNumbers.map((s) => s.trim()))
+    filtered = entries.filter((e) => wanted.has(e.incNumber))
+  }
+
+  if (filtered.length === 0) {
+    return {
+      success: false,
+      processed: 0,
+      failed: 0,
+      errors: [],
+      error: 'Nenhuma turbina encontrada (planilha vazia ou filtro sem correspondência).'
+    }
+  }
+
+  log(`🏗 Fase 0 (Inspection Report): ${filtered.length} turbina(s) a processar.`)
+
+  let context: BrowserContext
+  try {
+    context = await getContext(options.headless ?? false)
+  } catch {
+    await closeServiceNowSession()
+    context = await getContext(options.headless ?? false)
+  }
+
+  let processed = 0
+  let failed = 0
+  const errors: string[] = []
+
+  for (let i = 0; i < filtered.length; i++) {
+    const entry = filtered[i]
+    const prefix = `[${i + 1}/${filtered.length}]`
+    const page = await context.newPage()
+    try {
+      const ok = await ensureInspectionReport(page, portalOrigin, entry, technician, log)
+      if (ok) {
+        processed++
+        log(`✓ ${prefix} ${entry.wtg} (${entry.incNumber}) OK.`)
+      } else {
+        failed++
+        const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}) falhou.`
+        errors.push(msg)
+        log(msg)
+      }
+    } catch (err: any) {
+      failed++
+      const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}) erro: ${err.message}`
+      errors.push(msg)
+      log(msg)
+    } finally {
+      await page.close().catch(() => {})
+    }
+  }
+
+  log(`🏁 Fase 0 concluída: ${processed} ok, ${failed} falha(s).`)
+  return { success: true, processed, failed, errors }
 }
 
 // ─── Leitura da planilha (mesmo layout de saída do SNOW Processor) ──────────
@@ -942,6 +1292,55 @@ export async function getSpreadsheetBlades(
     return { success: true, blades: Array.from(map.values()) }
   } catch (err: any) {
     return { success: false, blades: [], error: err.message }
+  }
+}
+
+// ─── Planilha de controle (Turbina → INC → Data Coleta) ─────────────────────
+// Fonte pra Fase 0 (Inspection Report) — planilha de controle mantida pela equipe
+// ("Status Envio ServiceNOW - <cliente>.xlsx", aba "Turbinas"), colunas na ordem:
+// A WTG | B Turbina ID | C INC (SNOW) | D Data Coleta | E Data Report |
+// F Estado de Inspeção | G Status Arthnex | H Status SNOW (Cliente) | I Observações.
+// Só as 4 primeiras colunas importam pra Fase 0 — o resto é status de acompanhamento
+// interno, sem uso na automação.
+
+export interface TurbineIncEntry {
+  wtg: string // ex.: "VSR03-01"
+  turbineId: string // ex.: "90626"
+  incNumber: string // ex.: "INC3034373"
+  dataColeta: string // ex.: "18/06/2026" — já no formato DD/MM/YYYY que o campo do
+  // formulário "Inspection Start Date" espera, sem conversão extra necessária
+}
+
+export async function readTurbineIncList(
+  xlsxPath: string
+): Promise<{ success: boolean; entries: TurbineIncEntry[]; error?: string }> {
+  try {
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(xlsxPath)
+    const ws = wb.worksheets[0]
+    const entries: TurbineIncEntry[] = []
+
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r)
+      const wtg = String(row.getCell(1).value ?? '').trim()
+      const turbineId = String(row.getCell(2).value ?? '').trim()
+      const incNumber = String(row.getCell(3).value ?? '').trim()
+      if (!wtg || !incNumber) continue // linha vazia ou fora do padrão — pula
+
+      // ExcelJS lê célula formatada como data como um objeto Date de verdade, não
+      // como texto "18/06/2026" — reformata pro padrão DD/MM/YYYY do formulário.
+      const dataColetaValue = row.getCell(4).value
+      const dataColeta =
+        dataColetaValue instanceof Date
+          ? `${String(dataColetaValue.getDate()).padStart(2, '0')}/${String(dataColetaValue.getMonth() + 1).padStart(2, '0')}/${dataColetaValue.getFullYear()}`
+          : String(dataColetaValue ?? '').trim()
+
+      entries.push({ wtg, turbineId, incNumber, dataColeta })
+    }
+
+    return { success: true, entries }
+  } catch (err: any) {
+    return { success: false, entries: [], error: err.message }
   }
 }
 

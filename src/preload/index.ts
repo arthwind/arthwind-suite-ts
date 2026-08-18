@@ -59,7 +59,9 @@ const ipcMethods = [
   'snow_automation_login',
   'snow_automation_close',
   'snow_automation_get_blades',
-  'snow_automation_run'
+  'snow_automation_run',
+  'snow_read_turbine_inc_list',
+  'snow_inspection_report_run'
 ]
 
 
