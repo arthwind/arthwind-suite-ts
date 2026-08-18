@@ -23,7 +23,7 @@ export default function SnowAutomationModule({ D }) {
 
   // ── Fase 0: Create Inspection Report (etapa anterior ao Damage Report Entry) ──
   const [controlXlsxPath, setControlXlsxPath] = useState('');
-  const [portalOrigin, setPortalOrigin] = useState('');
+  const [portalOrigin, setPortalOrigin] = useState('https://nordexprod.service-now.com/bam?id=external_portal_home');
   const [technician, setTechnician] = useState('');
   const [skipAlreadySent, setSkipAlreadySent] = useState(true);
   const [runningInspectionPhase, setRunningInspectionPhase] = useState(false);
