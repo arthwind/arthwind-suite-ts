@@ -1645,3 +1645,24 @@ verdade `page.isClosed()` virar `true` (até 3s, checando a cada 100ms) e
 ainda soma uma folga de 300ms antes de chamar o Módulo 24 — dá tempo do
 fechamento se propagar de verdade antes de qualquer coisa tentar pegar
 uma página do contexto.
+
+## Bug corrigido: link "Damage Report Entries" não achado — Related Lists carrega via AJAX
+
+Depois do fix acima, a auditoria ainda falhava com "NÃO encontrou a
+tabela 'Damage Report Entries'" mesmo em turbinas onde o Inspection
+Report já existia ("Show"). Print do usuário confirmou: a seção
+"Related Lists" com o link "Damage Report Entries" (badge mostrando a
+contagem, ex.: "19") existe de verdade rolando até o fim da página — não
+é um problema de página errada.
+
+**Causa raiz**: `navigateToDamageEntriesList` rolava até o fim UMA vez e
+esperava só 800ms fixos antes de checar de novo — insuficiente. A seção
+"Related Lists" carrega via AJAX DEPOIS do resto do formulário já estar
+visível (a contagem ao lado de cada lista vem de uma chamada separada do
+ServiceNow) — em páginas mais pesadas (como essa, com vários campos e
+anexos), 800ms não é tempo suficiente pra essa chamada terminar.
+
+**Fix**: troca o scroll-e-espera-uma-vez por um loop de até 12 tentativas
+(rola + espera 1s + tenta achar o link de novo), ~12s de paciência total
+— mesmo padrão já usado em `findAndOpenIncident` pra esperar o portal
+Angular renderizar.

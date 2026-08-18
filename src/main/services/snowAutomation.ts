@@ -1985,13 +1985,21 @@ async function navigateToDamageEntriesList(page: Page, log: LogFn): Promise<bool
     return true
   }
 
-  // A seção "Related Lists" fica no final do formulário — se não achou de primeira,
-  // rola até o fim (força o carregamento, caso seja lazy) e tenta de novo.
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {})
-  await page.waitForTimeout(800)
-  if (await tryClick()) {
-    log(`  ✓ Clicado no link 'Damage Report Entries' (após rolar até o final da página)`)
-    return true
+  // A seção "Related Lists" fica no final do formulário e pode carregar via AJAX
+  // DEPOIS do resto da página já estar visível — a contagem ao lado de cada lista
+  // (ex.: "Damage Report Entries 19") vem de uma chamada separada. Achado em teste
+  // real (confirmado com print do usuário: a seção existe rolando até o fim, mas
+  // um scroll + espera fixa de 800ms não bastava — a seção ainda não tinha
+  // carregado nesse ponto). Rola até o fim e tenta várias vezes com intervalo (até
+  // ~12s), em vez de desistir numa única checagem — mesmo padrão de paciência já
+  // usado em `findAndOpenIncident`.
+  for (let attempt = 0; attempt < 12; attempt++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {})
+    if (await tryClick()) {
+      log(`  ✓ Clicado no link 'Damage Report Entries' (após rolar até o final da página)`)
+      return true
+    }
+    await page.waitForTimeout(1000)
   }
   return false
 }
