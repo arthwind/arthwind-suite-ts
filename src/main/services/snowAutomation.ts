@@ -1091,6 +1091,25 @@ export async function runInspectionReportPhase(
     context = await getContext(options.headless ?? false)
   }
 
+  // Garante sessão logada ANTES de navegar pra qualquer coisa — mesmo motivo de
+  // `ensureAuthenticatedPage` no resto do Módulo 24: a home do portal pode
+  // mostrar uma tela PARCIAL de login/SSO em vez do portal de verdade se a
+  // sessão expirou (ou é a primeira vez), e sem essa checagem o código seguia
+  // direto tentando achar o tile "My Inspection Reports" numa tela que nem
+  // carregou de verdade — dando erro na primeira turbina sempre que precisava
+  // logar, em vez de esperar/pedir login como o resto da automação já faz.
+  const authPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+  const ready = await ensureAuthenticatedPage(authPage, portalOrigin, log, options.headless ?? false)
+  if (!ready) {
+    return {
+      success: false,
+      processed: 0,
+      failed: 0,
+      errors: [],
+      error: 'Sessão do ServiceNow não autenticada (login necessário).'
+    }
+  }
+
   let processed = 0
   let failed = 0
   const errors: string[] = []
