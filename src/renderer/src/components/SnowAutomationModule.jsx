@@ -25,6 +25,7 @@ export default function SnowAutomationModule({ D }) {
   const [controlXlsxPath, setControlXlsxPath] = useState('');
   const [portalOrigin, setPortalOrigin] = useState('');
   const [technician, setTechnician] = useState('');
+  const [skipAlreadySent, setSkipAlreadySent] = useState(true);
   const [runningInspectionPhase, setRunningInspectionPhase] = useState(false);
 
 
@@ -127,13 +128,17 @@ export default function SnowAutomationModule({ D }) {
           setLogs((prev) => [...prev, { text: `✗ Falha ao ler a planilha de controle: ${list.error || 'nenhuma turbina encontrada'}`, type: 'error' }]);
           return;
         }
-        onlyIncNumbers = [list.entries[0].incNumber];
+        // Pega a 1ª turbina AINDA PENDENTE (Status SNOW não começa com "Enviado") —
+        // testar numa já enviada só validaria o caminho "Show Inspection Report",
+        // não o preenchimento de verdade que precisa de teste.
+        const firstPending = list.entries.find((e) => !/^enviado/i.test((e.statusSnow || '').trim())) || list.entries[0];
+        onlyIncNumbers = [firstPending.incNumber];
       }
       const res = await window.pywebview.api.snow_inspection_report_run(
         controlXlsxPath,
         portalOrigin.trim(),
         technician.trim(),
-        { headless, ...(onlyIncNumbers ? { onlyIncNumbers } : {}) }
+        { headless, skipAlreadySent, ...(onlyIncNumbers ? { onlyIncNumbers } : {}) }
       );
       if (res.success) {
         setLogs((prev) => [...prev, {
@@ -412,6 +417,11 @@ export default function SnowAutomationModule({ D }) {
             disabled={busy}
             style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
           />
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: D.textSecond, cursor: 'pointer' }}>
+            <input type="checkbox" checked={skipAlreadySent} onChange={(e) => setSkipAlreadySent(e.target.checked)} disabled={busy} />
+            Pular turbinas com Status SNOW já "Enviado..." na planilha de controle
+          </label>
 
           <div style={{ display: 'flex', gap: '8px' }}>
             <button

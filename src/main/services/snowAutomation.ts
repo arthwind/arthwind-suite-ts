@@ -1038,6 +1038,12 @@ export interface InspectionReportRunOptions {
   // turbina antes de rodar a planilha de controle inteira (ver seção Verificação
   // do plano) sem precisar de um arquivo separado só com 1 linha.
   onlyIncNumbers?: string[]
+  // Pula turbinas cujo "Status SNOW (Cliente)" já é "Enviado..." — Inspection
+  // Report já deve existir pra esses casos (ver `isAlreadySentToClient`). Padrão
+  // true: sem isso, rodar a planilha de controle inteira numa campanha já em
+  // andamento batia erro de "INC não apareceu na busca" pra toda turbina já
+  // avançada, mascarando as que realmente precisavam de atenção.
+  skipAlreadySent?: boolean
 }
 
 export interface InspectionReportRunResult {
@@ -1069,6 +1075,16 @@ export async function runInspectionReportPhase(
   if (options.onlyIncNumbers && options.onlyIncNumbers.length > 0) {
     const wanted = new Set(options.onlyIncNumbers.map((s) => s.trim()))
     filtered = entries.filter((e) => wanted.has(e.incNumber))
+  }
+
+  const skipAlreadySent = options.skipAlreadySent ?? true
+  if (skipAlreadySent) {
+    const beforeCount = filtered.length
+    filtered = filtered.filter((e) => !isAlreadySentToClient(e.statusSnow))
+    const skippedCount = beforeCount - filtered.length
+    if (skippedCount > 0) {
+      log(`ℹ ${skippedCount} turbina(s) com Status SNOW "Enviado..." na planilha de controle — Inspection Report já deve existir, pulando sem tentar buscar.`)
+    }
   }
 
   if (filtered.length === 0) {
@@ -1328,6 +1344,21 @@ export interface TurbineIncEntry {
   incNumber: string // ex.: "INC3034373"
   dataColeta: string // ex.: "18/06/2026" — já no formato DD/MM/YYYY que o campo do
   // formulário "Inspection Start Date" espera, sem conversão extra necessária
+  statusSnow: string // coluna H "Status SNOW (Cliente)" — "Pendente" | "Enviado com
+  // Correção" | "Enviado sem Correção" | "" — usado só pra pular turbinas cujo
+  // defeito já foi enviado ao cliente (só é possível se o Inspection Report já
+  // existir de verdade no ServiceNow, então nem vale a pena tentar buscar de novo)
+}
+
+/** Uma turbina com Status SNOW já "Enviado..." (com ou sem correção) teve seus
+ * defeitos submetidos ao cliente — pré-requisito lógico é o Inspection Report já
+ * existir e estar submetido, então essas turbinas não precisam (e normalmente nem
+ * conseguem) passar pela Fase 0 de novo. Achado em teste real: rodar a planilha de
+ * controle inteira sem esse filtro batia em erro de "INC não apareceu na busca"
+ * pra boa parte das turbinas já avançadas — não é um erro de verdade, é só um INC
+ * que já saiu do estado buscável na lista "Technical Incidents" nessa etapa. */
+export function isAlreadySentToClient(statusSnow: string): boolean {
+  return /^enviado/i.test(statusSnow.trim())
 }
 
 export async function readTurbineIncList(
@@ -1336,7 +1367,7 @@ export async function readTurbineIncList(
   try {
     const wb = new ExcelJS.Workbook()
     await wb.xlsx.readFile(xlsxPath)
-    const ws = wb.worksheets[0]
+    const ws = wb.getWorksheet('Turbinas') || wb.worksheets[0]
     const entries: TurbineIncEntry[] = []
 
     for (let r = 2; r <= ws.rowCount; r++) {
@@ -1354,7 +1385,9 @@ export async function readTurbineIncList(
           ? `${String(dataColetaValue.getDate()).padStart(2, '0')}/${String(dataColetaValue.getMonth() + 1).padStart(2, '0')}/${dataColetaValue.getFullYear()}`
           : String(dataColetaValue ?? '').trim()
 
-      entries.push({ wtg, turbineId, incNumber, dataColeta })
+      const statusSnow = String(row.getCell(8).value ?? '').trim()
+
+      entries.push({ wtg, turbineId, incNumber, dataColeta, statusSnow })
     }
 
     return { success: true, entries }

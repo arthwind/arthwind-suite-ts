@@ -1398,3 +1398,38 @@ processo iterativo que todo o resto do Módulo 24 passou (selectors
 
 Próximo passo: rodar "Testar 1ª turbina" com o navegador visível
 (headless desligado) contra um INC real e corrigir o que não bater.
+
+## Bug corrigido: "Rodar planilha inteira" batia erro em turbina já avançada
+
+Testando com a planilha de controle REAL da campanha (74 turbinas):
+74% delas (Estado de Inspeção) já tinham o relatório completo enviado,
+e 34 dessas 74 já tinham "Status SNOW (Cliente)" = "Enviado com/sem
+Correção" — ou seja, o defeito JÁ foi submetido ao ServiceNow pro
+cliente. Rodar a Fase 0 pra essas turbinas batia em "INC não apareceu
+na busca de Technical Incidents" — não é um erro de verdade, é só que
+o INC já passou dessa etapa e não aparece mais buscável do mesmo jeito
+nessa tela.
+
+**Causa raiz**: se o defeito já foi enviado (Status SNOW = "Enviado..."),
+o Inspection Report *necessariamente* já existe — é pré-requisito lógico
+pra sequer conseguir cadastrar um defeito (não dá pra chegar na tela de
+Damage Report Entries sem passar pelo Inspection Report antes). Rodar a
+Fase 0 de novo pra essas turbinas era sempre desnecessário — e o
+resultado "não encontrado" ficava misturado com falhas de verdade, sem
+distinção nenhuma.
+
+**Fix**:
+- `TurbineIncEntry` ganhou o campo `statusSnow` (coluna H, "Status SNOW
+  (Cliente)").
+- Nova função `isAlreadySentToClient(statusSnow)` — testa se o texto
+  começa com "Enviado" (cobre "Enviado com Correção" e "Enviado sem
+  Correção").
+- `runInspectionReportPhase` filtra essas turbinas ANTES de tentar
+  buscar qualquer coisa (opção `skipAlreadySent`, padrão `true`) — loga
+  quantas foram puladas e por quê, sem contar como falha.
+- UI: checkbox "Pular turbinas com Status SNOW já 'Enviado...' na
+  planilha de controle", marcado por padrão.
+- "Testar 1ª turbina" também mudou: agora pega a primeira turbina
+  REALMENTE pendente (não a linha 1 da planilha, que podia já estar
+  enviada) — testar numa já enviada só validaria o caminho "Show
+  Inspection Report", não o preenchimento de verdade.
