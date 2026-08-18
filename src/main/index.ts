@@ -58,7 +58,8 @@ import {
   runSnowDamageAutomation,
   getSpreadsheetBlades,
   readTurbineIncList,
-  runInspectionReportPhase
+  runInspectionReportPhase,
+  runFullAutomation
 } from './services/snowAutomation'
 
 
@@ -524,6 +525,23 @@ app.whenReady().then(() => {
       options: { headless?: boolean; onlyIncNumbers?: string[] }
     ) => {
       return runInspectionReportPhase(controlXlsxPath, portalOrigin, technician, options, (msg: string) => {
+        event.sender.send('snow_automation_log', { msg })
+      })
+    }
+  )
+
+  // ─── SNOW Automation — Completa (Fase 0 + Módulo 24 numa passada só) ──────────
+  ipcMain.handle(
+    'snow_full_automation_run',
+    async (
+      event,
+      controlXlsxPath: string,
+      wtgRootFolder: string,
+      portalOrigin: string,
+      technician: string,
+      options: Parameters<typeof runFullAutomation>[4]
+    ) => {
+      return runFullAutomation(controlXlsxPath, wtgRootFolder, portalOrigin, technician, options, (msg: string) => {
         event.sender.send('snow_automation_log', { msg })
       })
     }

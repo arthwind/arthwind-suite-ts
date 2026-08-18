@@ -21,12 +21,13 @@ export default function SnowAutomationModule({ D }) {
   const [startRow, setStartRow] = useState('');
   const [endRow, setEndRow] = useState('');
 
-  // ── Fase 0: Create Inspection Report (etapa anterior ao Damage Report Entry) ──
+  // ── Automação Completa: Inspection Report + Damage Report Entry numa passada só ──
   const [controlXlsxPath, setControlXlsxPath] = useState('');
+  const [wtgRootFolder, setWtgRootFolder] = useState('');
   const [portalOrigin, setPortalOrigin] = useState('https://nordexprod.service-now.com/bam?id=external_portal_home');
   const [technician, setTechnician] = useState('');
   const [skipAlreadySent, setSkipAlreadySent] = useState(true);
-  const [runningInspectionPhase, setRunningInspectionPhase] = useState(false);
+  const [runningFullAutomation, setRunningFullAutomation] = useState(false);
 
 
   const [blades, setBlades] = useState([]);
@@ -37,7 +38,7 @@ export default function SnowAutomationModule({ D }) {
   const [queue, setQueue] = useState([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const [queueIndex, setQueueIndex] = useState(-1);
-  const busy = running || queueRunning || runningInspectionPhase;
+  const busy = running || queueRunning || runningFullAutomation;
   const [ran, setRan] = useState(false);
   const [logs, setLogs] = useState([]);
   const [result, setResult] = useState(null);
@@ -107,42 +108,36 @@ export default function SnowAutomationModule({ D }) {
     if (picked) setControlXlsxPath(picked);
   };
 
-  // onlyFirst=true testa só a 1ª turbina da planilha de controle — pensado pra
-  // conferir visualmente (headless desligado) antes de rodar a planilha inteira,
-  // já que os seletores dessa etapa nova ainda não foram confirmados contra o
-  // ServiceNow de verdade.
-  const handleRunInspectionPhase = async (onlyFirst) => {
-    if (!controlXlsxPath || !portalOrigin.trim() || !technician.trim()) return;
-    setRunningInspectionPhase(true);
+  const pickWtgRootFolder = async () => {
+    const picked = await window.pywebview.api.pick_folder();
+    if (picked) setWtgRootFolder(picked);
+  };
+
+  // mode='next' processa só a próxima turbina pendente com pasta pronta (bom pra
+  // conferir visualmente antes de soltar tudo); mode='all' processa todas as
+  // prontas de uma vez. Fluxo completo: acha o INC, decide Create/Show, preenche
+  // o Inspection Report se precisar, e já sobe os defeitos da pasta local
+  // correspondente — sem pedir nenhuma URL de Damage Report separada.
+  const handleRunFullAutomation = async (mode) => {
+    if (!controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()) return;
+    setRunningFullAutomation(true);
     setLogs((prev) => [...prev, {
-      text: onlyFirst
-        ? '▶ Fase 0 (Inspection Report) — testando só a 1ª turbina da planilha de controle...'
-        : '▶ Fase 0 (Inspection Report) — rodando a planilha de controle inteira...',
+      text: mode === 'next'
+        ? '▶ Automação Completa — próxima turbina pendente...'
+        : '▶ Automação Completa — todas as turbinas prontas...',
       type: 'info'
     }]);
     try {
-      let onlyIncNumbers;
-      if (onlyFirst) {
-        const list = await window.pywebview.api.snow_read_turbine_inc_list(controlXlsxPath);
-        if (!list.success || list.entries.length === 0) {
-          setLogs((prev) => [...prev, { text: `✗ Falha ao ler a planilha de controle: ${list.error || 'nenhuma turbina encontrada'}`, type: 'error' }]);
-          return;
-        }
-        // Pega a 1ª turbina AINDA PENDENTE (Status SNOW não começa com "Enviado") —
-        // testar numa já enviada só validaria o caminho "Show Inspection Report",
-        // não o preenchimento de verdade que precisa de teste.
-        const firstPending = list.entries.find((e) => !/^enviado/i.test((e.statusSnow || '').trim())) || list.entries[0];
-        onlyIncNumbers = [firstPending.incNumber];
-      }
-      const res = await window.pywebview.api.snow_inspection_report_run(
+      const res = await window.pywebview.api.snow_full_automation_run(
         controlXlsxPath,
+        wtgRootFolder,
         portalOrigin.trim(),
         technician.trim(),
-        { headless, skipAlreadySent, ...(onlyIncNumbers ? { onlyIncNumbers } : {}) }
+        { headless, skipAlreadySent, mode }
       );
       if (res.success) {
         setLogs((prev) => [...prev, {
-          text: `✓ Fase 0 concluída: ${res.processed} ok, ${res.failed} falha(s).`,
+          text: `✓ Automação Completa concluída: ${res.processed} ok, ${res.failed} falha(s), ${res.skippedNoFolder} sem pasta pronta ainda.`,
           type: res.failed > 0 ? 'warning' : 'success'
         }]);
       } else {
@@ -151,7 +146,7 @@ export default function SnowAutomationModule({ D }) {
     } catch (err) {
       setLogs((prev) => [...prev, { text: `Erro crítico: ${err.message || err}`, type: 'error' }]);
     } finally {
-      setRunningInspectionPhase(false);
+      setRunningFullAutomation(false);
     }
   };
 
@@ -379,12 +374,14 @@ export default function SnowAutomationModule({ D }) {
           gap: '8px'
         }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: D.textPrimary }}>
-            Fase 0 — Create Inspection Report
+            Automação Completa (Inspection Report + Defeitos)
           </div>
           <div style={{ fontSize: '10.5px', color: D.textMuted, lineHeight: '1.4' }}>
-            Garante que o Inspection Report de cada turbina existe e está submetido
-            (etapa anterior ao cadastro de defeitos abaixo). Ainda em teste — recomendado
-            rodar "Testar 1ª turbina" com o navegador visível antes de rodar a planilha inteira.
+            Acha o INC, decide Create/Show Inspection Report, preenche o cabeçalho
+            se precisar, e já sobe os defeitos da pasta local da turbina — sem
+            precisar de nenhuma URL de Damage Report, só o INC (da planilha) e a
+            pasta (abaixo). Ainda em teste — recomendado rodar "Rodar próxima
+            pendente" com o navegador visível antes de soltar tudo de uma vez.
           </div>
 
           <div className="form-group" style={{ margin: 0 }}>
@@ -397,6 +394,20 @@ export default function SnowAutomationModule({ D }) {
               <span style={{ color: controlXlsxPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
               <span className="input-field-text" title={controlXlsxPath || 'Selecione o arquivo .xlsx'}>
                 {controlXlsxPath ? controlXlsxPath.split('\\').pop() : 'Selecione o arquivo .xlsx'}
+              </span>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <div className="field-label" style={{ color: D.textMuted }}>Pasta raiz das turbinas (ex: D:\SNOW\WTG'S)</div>
+            <div
+              className={`input-field${wtgRootFolder ? " filled" : ""}`}
+              onClick={!busy ? pickWtgRootFolder : undefined}
+              style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
+            >
+              <span style={{ color: wtgRootFolder ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+              <span className="input-field-text" title={wtgRootFolder || 'Selecione a pasta raiz'}>
+                {wtgRootFolder || 'Selecione a pasta raiz'}
               </span>
             </div>
           </div>
@@ -425,8 +436,8 @@ export default function SnowAutomationModule({ D }) {
 
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
-              onClick={() => handleRunInspectionPhase(true)}
-              disabled={busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()}
+              onClick={() => handleRunFullAutomation('next')}
+              disabled={busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()}
               style={{
                 flex: 1,
                 background: D.bgCard,
@@ -437,14 +448,14 @@ export default function SnowAutomationModule({ D }) {
                 fontSize: '11.5px',
                 fontWeight: 500,
                 cursor: busy ? 'not-allowed' : 'pointer',
-                opacity: (busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
+                opacity: (busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
               }}
             >
-              Testar 1ª turbina
+              Rodar próxima pendente
             </button>
             <button
-              onClick={() => handleRunInspectionPhase(false)}
-              disabled={busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()}
+              onClick={() => handleRunFullAutomation('all')}
+              disabled={busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()}
               style={{
                 flex: 1,
                 background: accent,
@@ -455,10 +466,10 @@ export default function SnowAutomationModule({ D }) {
                 fontSize: '11.5px',
                 fontWeight: 500,
                 cursor: busy ? 'not-allowed' : 'pointer',
-                opacity: (busy || !controlXlsxPath || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
+                opacity: (busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
               }}
             >
-              Rodar planilha inteira
+              Rodar todas as prontas
             </button>
           </div>
         </div>

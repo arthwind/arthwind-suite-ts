@@ -1179,6 +1179,177 @@ export async function runInspectionReportPhase(
   return { success: true, processed, failed, errors }
 }
 
+// ─── Automação completa: Fase 0 + Módulo 24, numa passada só ────────────────
+// Une a busca do INC/Inspection Report com o cadastro dos defeitos — pra cada
+// turbina, decide Create/Show, preenche o cabeçalho se precisar, e sobe os
+// defeitos da pasta local correspondente, sem precisar que o usuário digite
+// nenhuma URL de Damage Report (a página já está lá depois da Fase 0).
+
+export interface FullAutomationOptions {
+  headless?: boolean
+  // Mesmo filtro/motivo de InspectionReportRunOptions.skipAlreadySent.
+  skipAlreadySent?: boolean
+  // 'all' processa toda turbina pendente que já tem pasta pronta em
+  // wtgRootFolder; 'next' processa só a primeira da planilha de controle
+  // (nessa ordem) que estiver pendente e com pasta pronta.
+  mode: 'all' | 'next'
+  // Repassadas pro Módulo 24 (autoSubmit, categorias, dryRun, etc.) — mesmas
+  // opções de sempre, ver RunAutomationOptions. localPhotosDir é preenchido
+  // automaticamente a partir da pasta da turbina, não precisa vir aqui.
+  moduleOptions?: RunAutomationOptions
+}
+
+export interface FullAutomationResult {
+  success: boolean
+  processed: number
+  failed: number
+  // Pendentes na planilha de controle, mas sem pasta pronta ainda em
+  // wtgRootFolder — não são erro, só ainda não chegaram no Módulo 23.
+  skippedNoFolder: number
+  errors: string[]
+  error?: string
+}
+
+export async function runFullAutomation(
+  controlXlsxPath: string,
+  wtgRootFolder: string,
+  portalOrigin: string,
+  technician: string,
+  options: FullAutomationOptions,
+  log_fn?: LogFn
+): Promise<FullAutomationResult> {
+  const log = log_fn || (() => {})
+  const { success, entries, error } = await readTurbineIncList(controlXlsxPath)
+  if (!success) {
+    return { success: false, processed: 0, failed: 0, skippedNoFolder: 0, errors: [], error: error || 'Falha ao ler a planilha de controle.' }
+  }
+
+  const skipAlreadySent = options.skipAlreadySent ?? true
+  let pending = skipAlreadySent ? entries.filter((e) => !isAlreadySentToClient(e.statusSnow)) : entries
+
+  const folders = scanWtgFolders(wtgRootFolder)
+  const folderMap = new Map(folders.map((f) => [f.wtg, f]))
+
+  const matched: { entry: TurbineIncEntry; folder: WtgFolderInfo }[] = []
+  let skippedNoFolder = 0
+  for (const e of pending) {
+    const folder = folderMap.get(normalizeWtg(e.wtg))
+    if (folder) {
+      matched.push({ entry: e, folder })
+    } else {
+      skippedNoFolder++
+    }
+  }
+
+  if (skippedNoFolder > 0) {
+    log(`ℹ ${skippedNoFolder} turbina(s) pendente(s) na planilha, mas sem pasta pronta em "${wtgRootFolder}" ainda — puladas (não é erro).`)
+  }
+
+  const toProcess = options.mode === 'next' ? matched.slice(0, 1) : matched
+
+  if (toProcess.length === 0) {
+    return {
+      success: false,
+      processed: 0,
+      failed: 0,
+      skippedNoFolder,
+      errors: [],
+      error: `Nenhuma turbina pronta pra processar (pendente na planilha + com pasta em "${wtgRootFolder}").`
+    }
+  }
+
+  log(`🚀 Automação completa: ${toProcess.length} turbina(s) prontas (Inspection Report + Defeitos).`)
+
+  let context: BrowserContext
+  try {
+    context = await getContext(options.headless ?? false)
+  } catch {
+    await closeServiceNowSession()
+    context = await getContext(options.headless ?? false)
+  }
+
+  const authPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+  const ready = await ensureAuthenticatedPage(authPage, portalOrigin, log, options.headless ?? false)
+  if (!ready) {
+    return {
+      success: false,
+      processed: 0,
+      failed: 0,
+      skippedNoFolder,
+      errors: [],
+      error: 'Sessão do ServiceNow não autenticada (login necessário).'
+    }
+  }
+
+  let processed = 0
+  let failed = 0
+  const errors: string[] = []
+
+  for (let i = 0; i < toProcess.length; i++) {
+    const { entry, folder } = toProcess[i]
+    const prefix = `[${i + 1}/${toProcess.length}]`
+    const page = await context.newPage()
+    try {
+      const found = await findAndOpenIncident(page, portalOrigin, entry.incNumber, log)
+      if (!found) throw new Error('INC não encontrado na busca de Technical Incidents.')
+
+      const state = await detectInspectionReportState(page, log)
+      if (state === 'unknown') throw new Error('Não achou nem "Create" nem "Show Inspection Report" na tela do INC.')
+
+      const clicked = await clickInspectionReportButton(page, state, log)
+      if (!clicked) {
+        throw new Error(`Não conseguiu clicar em "${state === 'create' ? 'Create' : 'Show'} Inspection Report".`)
+      }
+
+      if (state === 'create') {
+        const data = buildInspectionReportData(entry.wtg, entry.dataColeta, technician)
+        const filler = new InspectionReportFiller(page, log)
+        const submitted = await filler.fill(data)
+        if (!submitted) throw new Error('Falha ao submeter o Inspection Report.')
+      } else {
+        log(`  ✓ ${prefix} Inspection Report de ${entry.wtg} já existia — indo direto pros defeitos.`)
+      }
+
+      // A página já está onde o Módulo 24 espera estar depois de receber uma
+      // URL de Inspection Report — usa a URL atual em vez de pedir pro
+      // usuário digitar uma. Fecha essa aba antes de chamar o Módulo 24
+      // porque ele abre/gerencia as próprias abas a partir daqui.
+      const derivedIncidentUrl = page.url()
+      await page.close().catch(() => {})
+
+      const moduleResult = await runSnowDamageAutomation(
+        folder.excelPath,
+        derivedIncidentUrl,
+        {
+          ...(options.moduleOptions || {}),
+          headless: options.headless,
+          ...(folder.photosDir ? { localPhotosDir: folder.photosDir } : {})
+        },
+        (m) => log(`  ${prefix} ${m}`)
+      )
+
+      if (moduleResult.success) {
+        processed++
+        log(`✓ ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.processed} defeito(s) ok, ${moduleResult.failed} falha(s).`)
+      } else {
+        failed++
+        const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.error}`
+        errors.push(msg)
+        log(msg)
+      }
+    } catch (err: any) {
+      failed++
+      const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}): ${err.message}`
+      errors.push(msg)
+      log(msg)
+      await page.close().catch(() => {})
+    }
+  }
+
+  log(`🏁 Automação completa concluída: ${processed} ok, ${failed} falha(s), ${skippedNoFolder} sem pasta pronta.`)
+  return { success: true, processed, failed, skippedNoFolder, errors }
+}
+
 // ─── Leitura da planilha (mesmo layout de saída do SNOW Processor) ──────────
 // A ordem bate com OUTPUT_HEADERS de snowProcessor.ts:
 // A Blade serial | B Sub Component | C Failure Type | D Damage Description |
@@ -1414,6 +1585,57 @@ export async function readTurbineIncList(
   } catch (err: any) {
     return { success: false, entries: [], error: err.message }
   }
+}
+
+/** Remove tudo que não é letra/número e deixa maiúsculo — usada pra cruzar o WTG
+ * da planilha de controle ("VSR19-04") com o nome da pasta local em
+ * `D:\SNOW\WTG'S` ("VSR-19-04", com um hífen a mais) sem precisar decidir qual
+ * dos dois formatos é "o certo". */
+function normalizeWtg(s: string): string {
+  return s.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+export interface WtgFolderInfo {
+  wtg: string // normalizado via normalizeWtg — bate com o WTG da planilha de controle
+  excelPath: string
+  photosDir: string | null
+}
+
+/** Varre a pasta raiz (`D:\SNOW\WTG'S` na prática) atrás de subpastas com um
+ * Excel `..._Novo_Excel.xlsx` dentro (padrão de saída do Módulo 23) — é isso que
+ * confirma que os defeitos de uma turbina já estão prontos pra subir. Não lê
+ * conteúdo nenhum, só localiza os caminhos; `runFullAutomation` decide o que
+ * fazer com cada um. */
+export function scanWtgFolders(rootDir: string): WtgFolderInfo[] {
+  const results: WtgFolderInfo[] = []
+  let dirents: fs.Dirent[]
+  try {
+    dirents = fs.readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return results
+  }
+
+  for (const d of dirents) {
+    if (!d.isDirectory()) continue
+    const folderPath = path.join(rootDir, d.name)
+    let files: string[]
+    try {
+      files = fs.readdirSync(folderPath)
+    } catch {
+      continue
+    }
+    const excelFile = files.find((f) => /_Novo_Excel\.xlsx$/i.test(f))
+    if (!excelFile) continue
+
+    const photosDir = path.join(folderPath, 'Fotos')
+    results.push({
+      wtg: normalizeWtg(d.name),
+      excelPath: path.join(folderPath, excelFile),
+      photosDir: fs.existsSync(photosDir) ? photosDir : null
+    })
+  }
+
+  return results
 }
 
 // ─── Busca de Fotos Locais Geradas pelo Módulo 23 ───────────────────────────

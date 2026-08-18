@@ -1457,3 +1457,56 @@ intervalMs=1000)` — tenta achar o elemento várias vezes com intervalo
 Também trocado `domcontentloaded` por `networkidle` nos `waitForLoadState`
 depois de cada navegação/clique, mesmo padrão de paciência já usado em
 `openDamageEntryForm` pro resto do módulo.
+
+## Feature: Automação Completa — Fase 0 + Módulo 24 numa passada só
+
+Pedido do usuário depois de confirmar que a Fase 0 isolada funcionava: unir
+as duas etapas. A lógica certa é acha o INC → se "Show", só sobe os
+defeitos; se "Create", preenche o Inspection Report primeiro e DEPOIS sobe
+os defeitos — tudo numa passada, sem pedir uma segunda URL (já se tem a
+URL do portal e o número do INC, o link específico do Damage Report é
+achado sozinho navegando).
+
+Também pedido: usar as pastas locais já geradas pelo Módulo 23
+(`D:\SNOW\WTG'S\<WTG>\<WTG>_Novo_Excel.xlsx` + `Fotos\`) pra saber quais
+turbinas pendentes na planilha de controle já têm defeito pronto pra
+subir, com opção de rodar tudo que estiver pronto ou só a próxima da
+planilha.
+
+### Peças novas
+
+- `scanWtgFolders(rootDir)` — varre a pasta raiz atrás de subpastas com
+  `..._Novo_Excel.xlsx` dentro (confirma que o Módulo 23 já processou essa
+  turbina). Não lê conteúdo, só localiza os caminhos (Excel + `Fotos\`, se
+  existir).
+- `normalizeWtg(s)` — acerta a diferença de formato achada inspecionando a
+  pasta real: `D:\SNOW\WTG'S` usa `VSR-19-04` (hífen extra), a planilha de
+  controle usa `VSR19-04` (sem). Remove tudo que não é letra/número dos
+  dois lados antes de comparar, sem precisar decidir qual formato é "o
+  certo".
+- `runFullAutomation(controlXlsxPath, wtgRootFolder, portalOrigin,
+  technician, options, log)` — por turbina: `findAndOpenIncident` →
+  `detectInspectionReportState` → `clickInspectionReportButton` → (se
+  `'create'`) preenche e submete o Inspection Report → captura `page.url()`
+  (é a URL que o Módulo 24 já espera receber) → chama
+  `runSnowDamageAutomation(folder.excelPath, page.url(), ...)` sem mudar
+  nada dentro dele. `runSnowDamageAutomation` e todo o resto do Módulo 24
+  ficam intocados — só passam a receber a URL descoberta automaticamente em
+  vez de digitada.
+- `options.mode`: `'all'` processa toda turbina pendente com pasta pronta;
+  `'next'` processa só a primeira da planilha de controle (nessa ordem)
+  que estiver pendente e com pasta pronta — pra testar uma de cada vez
+  antes de soltar o lote inteiro.
+
+### UI
+
+A seção "Fase 0" virou **"Automação Completa"**: ganhou um seletor de
+pasta raiz (`D:\SNOW\WTG'S`), e os botões viraram **"Rodar próxima
+pendente"** / **"Rodar todas as prontas"**. Não pede mais nenhuma URL de
+Damage Report — só a URL do portal (já vem pré-preenchida), a planilha de
+controle, a pasta raiz e o nome do técnico.
+
+O formulário manual antigo (Planilha SNOW / Pasta de Fotos / URL do
+Inspection Report / seleção de pás / fila overnight) continua existindo
+sem mudança nenhuma, abaixo dessa seção — é o caminho manual pra rodar uma
+turbina específica fora do fluxo automático (ex.: reprocessar algo pontual).
