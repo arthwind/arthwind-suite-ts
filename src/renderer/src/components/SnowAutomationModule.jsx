@@ -133,7 +133,15 @@ export default function SnowAutomationModule({ D }) {
         wtgRootFolder,
         portalOrigin.trim(),
         technician.trim(),
-        { headless, skipAlreadySent, mode }
+        {
+          headless,
+          skipAlreadySent,
+          mode,
+          // Sem isso, o Módulo 24 nunca recebia autoSubmit/categorias/dryRun —
+          // ficava sempre no padrão (autoSubmit=false), mesmo com a caixa
+          // marcada na UI, porque esse objeto simplesmente não existia antes.
+          moduleOptions: { autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }
+        }
       );
       if (res.success) {
         setLogs((prev) => [...prev, {

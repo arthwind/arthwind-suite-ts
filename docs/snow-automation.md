@@ -1574,3 +1574,22 @@ Remove-Item -Recurse -Force node_modules\playwright-core\.local-browsers\chromiu
 ```
 Sem isso, o instalador volta a depender do Playwright já estar instalado
 na máquina de quem recebe.
+
+## Bug corrigido: Automação Completa nunca repassava autoSubmit/categorias/dryRun
+
+Reportado pelo usuário: marcar "Submeter formulário automaticamente" não
+fazia diferença nenhuma rodando pela Automação Completa.
+
+**Causa raiz**: `handleRunFullAutomation` (UI) montava as opções de
+`snow_full_automation_run` sem incluir `moduleOptions` nenhum —
+`{ headless, skipAlreadySent, mode }`, só isso. `runFullAutomation` repassa
+`options.moduleOptions` direto pro `runSnowDamageAutomation` de cada
+turbina; sem esse campo, `autoSubmit` sempre caía no padrão (`false`),
+mesmo com a caixa marcada na tela — o checkbox e a fila overnight tinham
+esse mesmo tipo de bug corrigido antes (ver seção "fila overnight ignorava
+mudança de Submeter automaticamente" mais acima), mas a Automação Completa
+era um caminho novo que nunca tinha essa conexão feita.
+
+**Fix**: `handleRunFullAutomation` agora inclui `moduleOptions: {
+autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }`
+(mesmos estados já usados pelo formulário manual mais abaixo na tela).
