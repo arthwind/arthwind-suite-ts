@@ -1533,3 +1533,44 @@ verdade o botão "Add Damage Entry" aparecer na página (via
 `waitVisibleWithRetry`, até ~30s) antes de considerar a submissão
 concluída e devolver `true`. Só depois disso `runFullAutomation` captura
 `page.url()` — garantindo que é a página certa pro Módulo 24 continuar.
+
+## Bug de distribuição corrigido: instalador dependia de Playwright instalado na máquina de quem recebe
+
+Achado pelo usuário: o Chromium que o Playwright usa pra automação NÃO é
+baixado junto com o `npm install` normal — ele vai pro cache global do
+usuário (`%LOCALAPPDATA%\ms-playwright`), fora do projeto, e por isso NUNCA
+foi incluído no instalador. Rodando o `.exe` numa máquina que nunca rodou
+`npx playwright install` antes, a automação SNOW falharia ao tentar abrir o
+navegador — o instalador não era de verdade standalone.
+
+**Fix**: reinstalado o Chromium com `PLAYWRIGHT_BROWSERS_PATH=0` (variável
+de ambiente que o Playwright reconhece pra instalar dentro de
+`node_modules/playwright-core/.local-browsers` em vez do cache global) —
+esse caminho já é empacotado no instalador do mesmo jeito que o `sharp`
+(dependência nativa) já era, só precisou adicionar
+`node_modules/playwright-core/.local-browsers/**` no `asarUnpack` do
+`electron-builder.yml` (executável não roda de dentro do `.asar`).
+`chromium_headless_shell` (baixado automaticamente junto, ~270MB) foi
+apagado antes do build — o código sempre usa o Chromium normal, tanto
+headed quanto headless, nunca esse build alternativo.
+
+**Verificado de verdade**: renomeado temporariamente o cache global
+(`ms-playwright` → `ms-playwright_DISABLED_TEST`) e rodado
+`chromium.launch()` isolado — lançou normal mesmo sem o cache global
+existir, confirmando que vem mesmo do caminho empacotado, não por
+coincidência de já estar instalado na máquina de dev.
+
+**Efeito colateral aceito**: o instalador cresceu de ~111MB pra ~243MB
+(Chromium comprimido). Não tem como evitar — é o preço de não depender de
+mais nada instalado na máquina de quem recebe.
+
+**⚠️ Nota pra builds futuros**: se `node_modules` for reinstalado do zero
+(`npm install` limpo, clone novo, etc.), o Chromium volta a ser baixado no
+cache global por padrão — antes do próximo `npm run build:win`, rodar:
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = "0"
+npx playwright install chromium
+Remove-Item -Recurse -Force node_modules\playwright-core\.local-browsers\chromium_headless_shell-*
+```
+Sem isso, o instalador volta a depender do Playwright já estar instalado
+na máquina de quem recebe.

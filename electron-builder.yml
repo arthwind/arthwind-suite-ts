@@ -19,6 +19,13 @@ asarUnpack:
   - resources/**
   - node_modules/sharp/**
   - node_modules/@img/**
+  # Chromium do Playwright, instalado em node_modules em vez do cache global do
+  # usuário (%LOCALAPPDATA%/ms-playwright) — é o que faz a automação SNOW não
+  # depender de "npx playwright install" na máquina de quem recebe o instalador.
+  # Executável não roda de dentro do asar, por isso o unpack (mesmo motivo do
+  # sharp acima). Só o chromium normal (headed E headless usam o mesmo binário) —
+  # chromium_headless_shell foi removido antes do build por não ser usado.
+  - node_modules/playwright-core/.local-browsers/**
 win:
   executableName: arthwind-suite-ts
   icon: build/icon.ico
