@@ -1510,3 +1510,26 @@ O formulário manual antigo (Planilha SNOW / Pasta de Fotos / URL do
 Inspection Report / seleção de pás / fila overnight) continua existindo
 sem mudança nenhuma, abaixo dessa seção — é o caminho manual pra rodar uma
 turbina específica fora do fluxo automático (ex.: reprocessar algo pontual).
+
+## Bug corrigido: URL capturada logo após o Submit não era a página certa
+
+Primeiro teste real da Automação Completa: o Inspection Report preenchia e
+submetia certinho ("✓ Inspection Report submetido."), mas a auditoria do
+Módulo 24 logo em seguida nunca achava a tabela "Damage Report Entries" —
+"Add Damage Entry" nunca abria o formulário, e as linhas falhavam com
+"Target page, context or browser has been closed".
+
+**Causa raiz**: confirmado pelo usuário com print da tela real — "Create
+Inspection Report" é um formulário de CATÁLOGO do ServiceNow. Depois do
+Submit, o ServiceNow processa a requisição antes de carregar a página de
+verdade do Inspection Report (a que já tem "Add Damage Entry" disponível).
+`InspectionReportFiller.fill()` só esperava `networkidle` + 1s fixo depois
+do Submit — tempo insuficiente — e `runFullAutomation` capturava
+`page.url()` logo em seguida, pegando a URL de uma tela intermediária (de
+processamento/confirmação), não a do Inspection Report de verdade.
+
+**Fix**: depois do Submit, `InspectionReportFiller.fill()` agora espera de
+verdade o botão "Add Damage Entry" aparecer na página (via
+`waitVisibleWithRetry`, até ~30s) antes de considerar a submissão
+concluída e devolver `true`. Só depois disso `runFullAutomation` captura
+`page.url()` — garantindo que é a página certa pro Módulo 24 continuar.

@@ -902,14 +902,36 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     // nenhuma chamada de preenchimento pra esse campo.
 
     const submitted = await this.submitForm()
-    if (submitted) {
-      await this.page.waitForLoadState('networkidle').catch(() => {})
-      await this.page.waitForTimeout(1000)
-      this.log(`  ✓ Inspection Report submetido.`)
-    } else {
+    if (!submitted) {
       this.log(`  ✗ Não achou o botão Submit do Inspection Report.`)
+      return false
     }
-    return submitted
+
+    await this.page.waitForLoadState('networkidle').catch(() => {})
+
+    // Depois do Submit, o ServiceNow processa a requisição (é um formulário de
+    // catálogo) antes de carregar a página de verdade do Inspection Report —
+    // aquela com "Add Damage Entry" já disponível (achado em teste real: um
+    // tempo fixo depois do Submit não bastava, e a URL capturada logo em
+    // seguida não era a página certa pro Módulo 24 continuar; a auditoria
+    // seguinte nunca achava a tabela "Damage Report Entries"). Espera esse
+    // marcador aparecer de verdade em vez de confiar num tempo fixo.
+    const scopes = [this.page, ...this.page.frames()]
+    let ready = false
+    for (const s of scopes) {
+      const marker = s.getByRole('button', { name: /add damage entry/i })
+      if (await waitVisibleWithRetry(marker, 20, 1500)) {
+        ready = true
+        break
+      }
+    }
+
+    if (ready) {
+      this.log(`  ✓ Inspection Report submetido e carregado (Add Damage Entry disponível).`)
+    } else {
+      this.log(`  ⚠ Inspection Report submetido, mas a página não confirmou carregamento em ~30s — seguindo mesmo assim.`)
+    }
+    return true
   }
 }
 
