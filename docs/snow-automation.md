@@ -1797,3 +1797,38 @@ pro match global antigo (potencialmente ambíguo) se a turbina não tiver
 nenhuma pá com esse `bladeSn` cadastrada. `snowProcessor.ts` agora
 passa o `turbineSn` da própria linha da planilha (coluna H, já lido
 pra outros campos) em toda chamada.
+
+## Fix: checagem de upload de vídeo não trava mais a fila em modo Conferência Manual
+
+Usuário apontou: "essa coisa de verificar o upload dos vídeos só faz
+sentido se ele for submetido quando der certo, pra ele parar de enviar
+os damages só pra esperar o vídeo não faz sentido" — e confirmou o
+critério exato: "até pode continuar checando o upload mas tem que
+submeter, se não for submeter não checa".
+
+**Antes** — a Fase 3 (vídeo) sempre rodava a checagem `verifyVideoAttached`
+(até `MAX_VIDEO_ROUNDS=3` rodadas, timeout de 180s por vídeo) dentro de
+`runSnowDamageAutomation`, mesmo em modo Conferência Manual — onde o
+vídeo NUNCA era submetido automaticamente (Submit sempre ficava com o
+inspetor). Como a checagem não decidia nenhuma ação nesse modo, ela só
+existia pra logar "confirmado" ou "não confirmado" — e como
+`runFullAutomation` processa turbina por turbina de forma sequencial,
+esperando cada `runSnowDamageAutomation` terminar antes de começar a
+próxima, essa espera à toa atrasava a Inspection Report + Damage Entries
+da turbina SEGUINTE sem nenhum ganho real.
+
+**Fix** — a Fase 3 agora se divide em dois caminhos, pelo modo
+(`autoSubmit`) da execução:
+- **Conferência Manual** (`autoSubmit=false`): dispara o upload de cada
+  vídeo (uma aba própria, uma atrás da outra) e já segue pro próximo,
+  SEM chamar `verifyVideoAttached` e sem rodadas de retentativa — a aba
+  fica aberta, o upload continua em segundo plano, e cabe ao inspetor
+  conferir manualmente ao revisar. Isso elimina o atraso.
+- **Submissão Automática** (`autoSubmit=true`): mantém a checagem e as
+  retentativas (até `MAX_VIDEO_ROUNDS`), mas agora ela AUTORIZA uma
+  ação de verdade — confirmado o upload, o robô chama o novo método
+  `DamageEntryFiller.submitAndReadEntry()` (extraído do trecho de
+  submissão que já existia em `fill()`) pra clicar Submit e gravar o
+  número da entrada (`SNOW Entry #`) de volta na planilha, igual já
+  acontecia com defeitos/blanks. Não confirmou -> não submete, aba fica
+  aberta pra revisão manual, e a linha é reprocessada como antes.
