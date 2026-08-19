@@ -105,7 +105,14 @@ export function normalizarBlade(name: string): string {
     .replace(/\b(pala|pá|blade|posicao|posição|pa)\b/gi, '')
     .replace(/[-_\s]/g, '')
     .trim()
-  return posClean || s.replace(/[-_\s]/g, '')
+  const result = posClean || s.replace(/[-_\s]/g, '')
+
+  // Se sobrou só dígitos, remove zeros à esquerda (mantendo pelo menos 1 dígito) —
+  // bug real achado pelo usuário: o CSV trazia o SN da pá como "515", mas o
+  // Arthnex guardava a mesma pá como "0515" — sem essa tolerância a comparação
+  // estrita não batia, e nem entrava na lista de "candidatas ambíguas" pra
+  // escolher na mão, dava direto "sem match" nenhum.
+  return /^\d+$/.test(result) ? result.replace(/^0+(?=\d)/, '') : result
 }
 
 export function normalizarTurbine(name: string): string {
