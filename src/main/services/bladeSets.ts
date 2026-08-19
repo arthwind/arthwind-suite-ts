@@ -70,19 +70,38 @@ export interface BladeInfo {
 
 export type { BladeSetEntry }
 
-/** Retorna o Set Number pro Blade SN dado, ou null se não achar na lista. */
-export function getSetNumber(bladeSn: string | number): string | null {
+/** O Blade SN curto (ex.: "527") NÃO é único globalmente — o mesmo código pode
+ * aparecer em turbinas diferentes com Set Number diferente (confirmado: "527"
+ * existe tanto na VSR06-01 (Set 0171) quanto na VSR22-01 (Set 175)). Por isso,
+ * sempre que a turbina for conhecida, o match é restrito a ela primeiro; só cai
+ * pro match global (potencialmente ambíguo) se a turbina não for informada ou
+ * não tiver nenhuma pá com esse bladeSn cadastrada. */
+function findEntry(bladeSn: string | number, turbine?: string): BladeSetEntry | undefined {
   const key = String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
   const entries = loadBladeSets()
-  const match = entries.find((e) => e.bladeSn === key)
-  return match?.setNumber ?? null
+
+  if (turbine) {
+    const t = turbine.trim()
+    const scoped = entries.filter((e) => e.turbine === t || e.turbinePrefix === t || t.startsWith(e.turbinePrefix))
+    const scopedMatch = scoped.find((e) => e.bladeSn === key)
+    if (scopedMatch) return scopedMatch
+  }
+
+  return entries.find((e) => e.bladeSn === key)
 }
 
-/** Retorna informações completas da pá (Serial de 13 dígitos e Set Number). */
-export function getBladeInfo(bladeSn: string | number): BladeInfo {
-  const key = String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
-  const entries = loadBladeSets()
-  const match = entries.find((e) => e.bladeSn === key)
+/** Retorna o Set Number pro Blade SN dado, ou null se não achar na lista.
+ * Passe `turbine` (WTG ou serial completo) sempre que disponível — o bladeSn
+ * curto sozinho pode ser ambíguo entre turbinas diferentes. */
+export function getSetNumber(bladeSn: string | number, turbine?: string): string | null {
+  return findEntry(bladeSn, turbine)?.setNumber ?? null
+}
+
+/** Retorna informações completas da pá (Serial de 13 dígitos e Set Number).
+ * Passe `turbine` (WTG ou serial completo) sempre que disponível — o bladeSn
+ * curto sozinho pode ser ambíguo entre turbinas diferentes. */
+export function getBladeInfo(bladeSn: string | number, turbine?: string): BladeInfo {
+  const match = findEntry(bladeSn, turbine)
   return {
     serial: match?.serial ?? null,
     setNumber: match?.setNumber ?? null,

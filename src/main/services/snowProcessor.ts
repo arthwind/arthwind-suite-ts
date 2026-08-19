@@ -82,10 +82,10 @@ export class SnowMappings {
   }
 
 
-  static getDamageDescription(bladeSn: string | number, originalFailure: string): string {
+  static getDamageDescription(bladeSn: string | number, originalFailure: string, turbineSn?: string): string {
     const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
     const paddedBladeSn = rawSn ? rawSn.padStart(4, '0') : '0000'
-    const info = getBladeInfo(bladeSn)
+    const info = getBladeInfo(bladeSn, turbineSn)
     const setStr = info.setNumber ? String(info.setNumber).padStart(2, '0') : 'N/A'
 
     return [
@@ -802,7 +802,7 @@ export async function processSnowExcel(
 
     const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
     const failureType   = SnowMappings.getFailure(origFail, subComponent)
-    const damageDesc    = SnowMappings.getDamageDescription(bladeSn, origFail)
+    const damageDesc    = SnowMappings.getDamageDescription(bladeSn, origFail, turbineSn)
     const dfEnd         = SnowMappings.getDfEnd(dfStart, sizeMm)
     const profileDepth  = SnowMappings.getProfileFromCoordinates(
       section, side, component, polygonRaw ? String(polygonRaw) : '', dfStart
@@ -811,7 +811,7 @@ export async function processSnowExcel(
     const bladeSubsec   = SnowMappings.getBladeSubsection(component)
     const bladeArea     = SnowMappings.getBladeArea(component, side)
 
-    const bladeInfo = getBladeInfo(bladeSn)
+    const bladeInfo = getBladeInfo(bladeSn, turbineSn)
     const fullBladeSerial = bladeInfo.serial || String(bladeSn)
     const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
     const setNumberStr = bladeInfo.setNumber ? String(bladeInfo.setNumber).padStart(2, '0') : '00'

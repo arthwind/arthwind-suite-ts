@@ -1766,3 +1766,34 @@ Pedido do usuário: a inspeção é sempre feita num único dia — o campo
 do "Inspection Start Date" (Data Coleta da planilha de controle), sem
 precisar de coluna própria nem do checkbox "Inspection break" (que
 continua desmarcado, como já era).
+
+## Bug corrigido: Set Number errado no xlsx — Blade SN curto não é único entre turbinas
+
+Usuário reportou (com dados de referência): na turbina VSR22-01-90659,
+a pá 0527 (parte do trio 0526/0524/0527, todas Set 175) saiu no xlsx
+gerado como "0527 0171" — Set errado.
+
+**Causa raiz** — `blade_sets.json` (`resources/blade_sets.json`) tem
+208 entradas, e o campo curto `bladeSn` (ex.: "527") **não é único
+globalmente**, só dentro de cada turbina. Confirmado: o código "527"
+aparece em DUAS entradas diferentes:
+```
+turbine: VSR06-01-90631 → serial "A1 811 0527 0171" → Set 0171
+turbine: VSR22-01-90659 → serial "T3 811 0527 0175" → Set 175
+```
+`getBladeInfo(bladeSn)`/`getSetNumber(bladeSn)` (`src/main/services/
+bladeSets.ts`) buscavam só pelo `bladeSn`, sem turbina — `.find()`
+sempre retorna a PRIMEIRA ocorrência no array, e como a entrada da
+VSR06-01 vem antes da VSR22-01 no JSON, toda pá "527" de QUALQUER
+turbina caía errada no Set 0171 da VSR06-01. Usado em
+`SnowMappings.getDamageDescription` e na geração de linhas "Video" do
+xlsx de saída (`src/main/services/snowProcessor.ts`), ambos chamados
+só com o `bladeSn` da planilha, sem a turbina.
+
+**Fix** — `getBladeInfo`/`getSetNumber` agora aceitam um parâmetro
+opcional `turbine`. Quando informado, o match é restrito primeiro às
+pás dessa turbina (por `turbinePrefix` ou `turbine` completo); só cai
+pro match global antigo (potencialmente ambíguo) se a turbina não tiver
+nenhuma pá com esse `bladeSn` cadastrada. `snowProcessor.ts` agora
+passa o `turbineSn` da própria linha da planilha (coluna H, já lido
+pra outros campos) em toda chamada.
