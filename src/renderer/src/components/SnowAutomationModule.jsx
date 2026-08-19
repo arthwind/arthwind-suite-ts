@@ -360,61 +360,48 @@ export default function SnowAutomationModule({ D }) {
         overflowY: 'auto',
         paddingRight: '4px'
       }}>
-        <div style={{
-          background: `${accent}12`,
-          border: `1px solid ${accent}40`,
-          borderRadius: '8px',
-          padding: '10px',
-          fontSize: '11px',
-          color: D.textSecond,
-          lineHeight: '1.5'
-        }}>
-          Upload de fotos aprimorado: envia automaticamente as 2 fotos do Módulo 23 (pic1 com polígono desenhado + pic2 regional) da pasta local.
-        </div>
-
         {/* Fase 0 — Create Inspection Report (etapa anterior, opcional) */}
         <div style={{
-          border: `1px solid ${D.borderLight}`,
-          borderRadius: '8px',
-          padding: '10px',
+          border: `1.5px solid ${accent}50`,
+          borderRadius: '10px',
+          padding: '14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '8px'
+          gap: '10px'
         }}>
-          <div style={{ fontSize: '12px', fontWeight: 600, color: D.textPrimary }}>
-            Automação Completa (Inspection Report + Defeitos)
+          <div style={{ fontSize: '15px', fontWeight: 700, color: D.textPrimary }}>
+            🚀 Automação Completa
           </div>
-          <div style={{ fontSize: '10.5px', color: D.textMuted, lineHeight: '1.4' }}>
+          <div style={{ fontSize: '11.5px', color: D.textMuted, lineHeight: '1.5' }}>
             Acha o INC, decide Create/Show Inspection Report, preenche o cabeçalho
-            se precisar, e já sobe os defeitos da pasta local da turbina — sem
-            precisar de nenhuma URL de Damage Report, só o INC (da planilha) e a
-            pasta (abaixo). Ainda em teste — recomendado rodar "Rodar próxima
-            pendente" com o navegador visível antes de soltar tudo de uma vez.
+            se precisar, e já sobe os defeitos + vídeos da pasta local da turbina —
+            sem precisar de nenhuma URL de Damage Report, só o INC (da planilha) e
+            a pasta abaixo.
           </div>
 
           <div className="form-group" style={{ margin: 0 }}>
-            <div className="field-label" style={{ color: D.textMuted }}>Planilha de controle (Turbina/INC/Data Coleta)</div>
+            <div className="field-label" style={{ color: D.textMuted, fontSize: '12px' }}>Planilha de controle (Turbina/INC/Data Coleta)</div>
             <div
               className={`input-field${controlXlsxPath ? " filled" : ""}`}
               onClick={!busy ? pickControlXlsx : undefined}
               style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
               <span style={{ color: controlXlsxPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
-              <span className="input-field-text" title={controlXlsxPath || 'Selecione o arquivo .xlsx'}>
+              <span className="input-field-text" title={controlXlsxPath || 'Selecione o arquivo .xlsx'} style={{ fontSize: '12.5px' }}>
                 {controlXlsxPath ? controlXlsxPath.split('\\').pop() : 'Selecione o arquivo .xlsx'}
               </span>
             </div>
           </div>
 
           <div className="form-group" style={{ margin: 0 }}>
-            <div className="field-label" style={{ color: D.textMuted }}>Pasta raiz das turbinas (ex: D:\SNOW\WTG'S)</div>
+            <div className="field-label" style={{ color: D.textMuted, fontSize: '12px' }}>Pasta raiz das turbinas (ex: D:\SNOW\WTG'S)</div>
             <div
               className={`input-field${wtgRootFolder ? " filled" : ""}`}
               onClick={!busy ? pickWtgRootFolder : undefined}
               style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
               <span style={{ color: wtgRootFolder ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
-              <span className="input-field-text" title={wtgRootFolder || 'Selecione a pasta raiz'}>
+              <span className="input-field-text" title={wtgRootFolder || 'Selecione a pasta raiz'} style={{ fontSize: '12.5px' }}>
                 {wtgRootFolder || 'Selecione a pasta raiz'}
               </span>
             </div>
@@ -426,7 +413,7 @@ export default function SnowAutomationModule({ D }) {
             value={portalOrigin}
             onChange={(e) => setPortalOrigin(e.target.value)}
             disabled={busy}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '13px' }}
           />
           <input
             type="text"
@@ -434,15 +421,15 @@ export default function SnowAutomationModule({ D }) {
             value={technician}
             onChange={(e) => setTechnician(e.target.value)}
             disabled={busy}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '13px' }}
           />
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: D.textSecond, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: 'pointer' }}>
             <input type="checkbox" checked={skipAlreadySent} onChange={(e) => setSkipAlreadySent(e.target.checked)} disabled={busy} />
             Pular turbinas com Status SNOW já "Enviado..." na planilha de controle
           </label>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
             <button
               onClick={() => handleRunFullAutomation('next')}
               disabled={busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()}
@@ -452,9 +439,9 @@ export default function SnowAutomationModule({ D }) {
                 border: `1px solid ${D.borderLight}`,
                 color: D.textPrimary,
                 borderRadius: '8px',
-                padding: '8px',
-                fontSize: '11.5px',
-                fontWeight: 500,
+                padding: '11px',
+                fontSize: '13px',
+                fontWeight: 600,
                 cursor: busy ? 'not-allowed' : 'pointer',
                 opacity: (busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
               }}
@@ -470,9 +457,9 @@ export default function SnowAutomationModule({ D }) {
                 border: `1px solid ${accent}`,
                 color: '#fff',
                 borderRadius: '8px',
-                padding: '8px',
-                fontSize: '11.5px',
-                fontWeight: 500,
+                padding: '11px',
+                fontSize: '13px',
+                fontWeight: 600,
                 cursor: busy ? 'not-allowed' : 'pointer',
                 opacity: (busy || !controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()) ? 0.6 : 1
               }}
@@ -480,6 +467,36 @@ export default function SnowAutomationModule({ D }) {
               Rodar todas as prontas
             </button>
           </div>
+        </div>
+
+        <details style={{
+          border: `1px solid ${D.borderLight}`,
+          borderRadius: '10px',
+          padding: '2px 4px'
+        }}>
+          <summary style={{
+            fontSize: '13px',
+            fontWeight: 600,
+            color: D.textSecond,
+            cursor: 'pointer',
+            padding: '10px 8px',
+            userSelect: 'none'
+          }}>
+            ⚙️ Turbina manual / fila avulsa (avançado)
+          </summary>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px 8px 12px' }}>
+
+        <div style={{
+          background: `${accent}12`,
+          border: `1px solid ${accent}40`,
+          borderRadius: '8px',
+          padding: '10px',
+          fontSize: '11.5px',
+          color: D.textSecond,
+          lineHeight: '1.5'
+        }}>
+          Upload de fotos aprimorado: envia automaticamente as 2 fotos do Módulo 23 (pic1 com polígono desenhado + pic2 regional) da pasta local.
         </div>
 
         {/* Planilha */}
@@ -680,34 +697,48 @@ export default function SnowAutomationModule({ D }) {
           </div>
         </div>
 
-        {/* Headless, Submissão & Blank Image */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+        {/* Opções de execução */}
+        <div style={{
+          border: `1px solid ${D.borderLight}`,
+          borderRadius: '8px',
+          padding: '10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <div style={{ fontSize: '12.5px', fontWeight: 600, color: D.textPrimary }}>Opções de execução</div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: 'pointer' }}>
             <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={busy} />
             Rodar em segundo plano (sem mostrar o navegador)
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: dryRun ? 'not-allowed' : 'pointer', opacity: dryRun ? 0.5 : 1 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: dryRun ? 'not-allowed' : 'pointer', opacity: dryRun ? 0.5 : 1 }}>
             <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={busy || dryRun} />
             Submeter formulário automaticamente (desativado = apenas preenche)
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: 'pointer' }}>
             <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} disabled={busy} />
-            Modo Auditoria (dry run — só verifica o que falta, não abre nem preenche formulário nenhum)
+            Modo Auditoria (dry run — só verifica o que falta, não preenche nada)
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={includeDefects} onChange={(e) => setIncludeDefects(e.target.checked)} disabled={busy} />
-            Defeitos
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={includeBlanks} onChange={(e) => setIncludeBlanks(e.target.checked)} disabled={busy} />
-            Blank Images
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
-            <input type="checkbox" checked={includeVideos} onChange={(e) => setIncludeVideos(e.target.checked)} disabled={busy} />
-            Vídeos (DF 45-50)
-          </label>
-        </div>
 
+          <div style={{ height: '1px', background: D.borderLight, margin: '2px 0' }} />
+
+          <div style={{ fontSize: '11px', color: D.textMuted }}>Categorias a processar</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+              <input type="checkbox" checked={includeDefects} onChange={(e) => setIncludeDefects(e.target.checked)} disabled={busy} />
+              Defeitos
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+              <input type="checkbox" checked={includeBlanks} onChange={(e) => setIncludeBlanks(e.target.checked)} disabled={busy} />
+              Blanks
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: D.textSecond, cursor: 'pointer' }}>
+              <input type="checkbox" checked={includeVideos} onChange={(e) => setIncludeVideos(e.target.checked)} disabled={busy} />
+              Vídeos
+            </label>
+          </div>
+        </div>
 
 
 
@@ -826,6 +857,9 @@ export default function SnowAutomationModule({ D }) {
             {running ? 'Rodando...' : `▶ Rodar Agora (${selectedBlades.length} pá(s))`}
           </button>
         </div>
+
+          </div>
+        </details>
       </div>
 
 

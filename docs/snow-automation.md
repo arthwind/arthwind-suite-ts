@@ -1868,3 +1868,34 @@ Efeito colateral bom: como cada vídeo já está aberto numa aba própria
 desde o início, fica mais fácil achar/acompanhar visualmente (era um
 dos sintomas relatados — "não tem nenhuma aba de vídeo pra acompanhar",
 que na verdade era a aba só aparecendo tarde demais, no fim de tudo).
+
+## Reorganização da UI do módulo (SnowAutomationModule.jsx)
+
+Pedido do usuário: "muito texto pequeno que ninguém lê, botões
+importantes que ficam no final, temos que reorganizar tudo pra ficar
+mais simples de ver e apertar". O painel esquerdo tinha ~10 seções
+empilhadas (banner, Automação Completa, planilha, fotos, pás, INC,
+login, faixa de linhas, 6 checkboxes soltos, fila) com fonte majoritariamente
+10-12px, e os botões de ação do fluxo manual (Adicionar à Fila / Rodar
+Fila / Rodar Agora) só apareciam depois de rolar por tudo isso.
+
+**Fix**:
+- **"🚀 Automação Completa"** (o fluxo recomendado hoje, fruto de toda a
+  reorganização Fase 0 + Módulo 24 desta sessão) virou o card de
+  destaque sempre visível no topo, com fonte maior (15px de título,
+  13px nos campos) e os botões "Rodar próxima pendente"/"Rodar todas as
+  prontas" logo abaixo da configuração — sem precisar rolar nada.
+- O fluxo antigo de **turbina manual / fila avulsa** (Planilha SNOW,
+  Fotos, Pás, INC, Login, Faixa de linhas, Opções, Fila) foi movido pra
+  dentro de um `<details>` colapsado por padrão ("⚙️ Turbina manual /
+  fila avulsa (avançado)") — continua 100% funcional, só não compete
+  mais por atenção com o fluxo principal.
+- Os 6 checkboxes soltos (headless, autoSubmit, dryRun, Defeitos,
+  Blanks, Vídeos) viraram uma caixa "Opções de execução" com separador
+  visual entre os 3 modos de execução e as 3 categorias (essas em
+  linha, 3 colunas, não mais empilhadas uma embaixo da outra).
+- Fonte geral subiu de ~10-12px pra ~12.5-13px nos rótulos e inputs.
+
+Verificado abrindo o instalador de verdade (não só o dev server) e
+navegando visualmente pelo painel colapsado/expandido antes de
+considerar concluído.
