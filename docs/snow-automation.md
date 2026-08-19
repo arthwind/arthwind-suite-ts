@@ -1721,3 +1721,48 @@ logo depois de capturar a URL na Fase 0 — dá pra conferir diretamente no
 log se a URL capturada é mesmo específica da turbina (com algum
 identificador único) ou algo genérico, útil pra descartar de vez uma
 segunda hipótese (SPA sem URL própria por registro) se esse bug persistir.
+
+## Bug corrigido (diagnóstico do usuário): reaproveitamento de página pegava aba de vídeo de outra pá
+
+Depois do fix de `authPage`, novo teste real mostrou um problema
+diferente: na turbina 2, preenchendo a 1ª linha em modo Submissão
+Automática, o campo "Blade serial number" foi selecionado como "A1 811
+0618 0195" mas a leitura de confirmação voltou "T3 811 0475 0158" — um
+valor de OUTRA pá.
+
+**Causa raiz real, apontada pelo usuário**: não é sobre a mesma turbina
+"lembrar" o valor da linha anterior — é sobre vídeos ficarem com a aba
+aberta de propósito esperando revisão manual (design intencional, várias
+pás/turbinas acumulam abas de vídeo abertas ao longo de uma sessão longa).
+Em VÁRIOS pontos do código, "qual página reaproveitar" era decidido
+buscando `context.pages().find(p => !p.isClosed())` — ou "a página mais
+recente do contexto" — no CONTEXTO INTEIRO, sem nenhuma forma de
+distinguir "uma página genuinamente livre" de "a aba de vídeo de outra
+pá esperando o humano revisar". A automação podia acabar preenchendo o
+formulário de uma pá EM CIMA da aba de vídeo de outra, misturando dados.
+
+**Fix** — eliminado todo uso de "adivinhar no contexto compartilhado",
+substituído por rastreamento explícito de página em cada caso:
+- `authPage` (login) e `auditPage` (auditoria) — sempre abrem uma aba
+  NOVA agora, nunca tentam reaproveitar nenhuma.
+- Continuidade de aba entre linhas em modo Submissão Automática (design
+  intencional, pra não abrir aba nova a cada defeito) — agora rastreada
+  numa variável local (`sharedAutoSubmitPage`) escopada só a essa
+  turbina/chamada, nunca mais buscando no contexto inteiro.
+- `openDamageEntryForm` (detecção de popup ao clicar "Add Damage
+  Entry") — antes pegava "a página mais recente do contexto inteiro"
+  assumindo que era sempre o popup; agora conta as abas ANTES e DEPOIS
+  do clique, e só trata como popup se o número de abas realmente
+  cresceu POR CAUSA desse clique — senão usa a própria `targetPage`
+  (que sabemos ser a certa).
+
+Nenhuma dessas mudanças aponta pra uma aba de vídeo em momento nenhum —
+cada fluxo só enxerga a própria página que ele mesmo abriu.
+
+## Feature: Inspection End Date preenchido igual ao Start Date
+
+Pedido do usuário: a inspeção é sempre feita num único dia — o campo
+"Inspection End Date" do Inspection Report deve receber o MESMO valor
+do "Inspection Start Date" (Data Coleta da planilha de controle), sem
+precisar de coluna própria nem do checkbox "Inspection break" (que
+continua desmarcado, como já era).

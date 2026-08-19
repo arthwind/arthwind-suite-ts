@@ -907,6 +907,11 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     await this.setCheckbox('Safety checklist read and followed', true)
     await this.fillText('Responsible technicians', data.technician)
     await this.fillText('Inspection Start Date', data.inspectionStartDate)
+    // Inspection End Date é sempre o MESMO dia da Data Coleta (pedido do usuário —
+    // a inspeção é sempre feita num único dia) — mesmo valor do Start Date, sem
+    // precisar de coluna própria na planilha de controle nem do checkbox
+    // "Inspection break" (que fica desmarcado, como já era).
+    await this.fillText('Inspection End Date', data.inspectionStartDate)
     await this.selectFromComboBox('Access method', INSPECTION_REPORT_FIXED.accessMethod, 800)
     await this.selectFromComboBox('Blade type', INSPECTION_REPORT_FIXED.bladeType, 800)
     await this.fillText('Purchase Order', INSPECTION_REPORT_FIXED.purchaseOrder)
@@ -1182,7 +1187,13 @@ export async function runInspectionReportPhase(
   // direto tentando achar o tile "My Inspection Reports" numa tela que nem
   // carregou de verdade — dando erro na primeira turbina sempre que precisava
   // logar, em vez de esperar/pedir login como o resto da automação já faz.
-  const authPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+  // SEMPRE abre uma aba nova pra essa checagem — nunca "acha qualquer página
+  // aberta" no contexto. Bug real achado em teste (diagnosticado pelo usuário):
+  // abas de vídeo ficam abertas de propósito esperando revisão manual (podem ser
+  // de QUALQUER turbina já processada nessa sessão) — `context.pages().find(p =>
+  // !p.isClosed())` não distingue essas abas de uma página genuinamente livre pra
+  // reaproveitar, e podia acabar pegando a aba de vídeo de outra pá por engano.
+  const authPage = await context.newPage()
   const ready = await ensureAuthenticatedPage(authPage, portalOrigin, log, options.headless ?? false)
   if (!ready) {
     return {
@@ -1316,7 +1327,13 @@ export async function runFullAutomation(
     context = await getContext(options.headless ?? false)
   }
 
-  const authPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+  // SEMPRE abre uma aba nova pra essa checagem — nunca "acha qualquer página
+  // aberta" no contexto. Bug real achado em teste (diagnosticado pelo usuário):
+  // abas de vídeo ficam abertas de propósito esperando revisão manual (podem ser
+  // de QUALQUER turbina já processada nessa sessão) — `context.pages().find(p =>
+  // !p.isClosed())` não distingue essas abas de uma página genuinamente livre pra
+  // reaproveitar, e podia acabar pegando a aba de vídeo de outra pá por engano.
+  const authPage = await context.newPage()
   const ready = await ensureAuthenticatedPage(authPage, portalOrigin, log, options.headless ?? false)
   if (!ready) {
     return {
@@ -2795,6 +2812,10 @@ async function openDamageEntryForm(
   // rodando só vídeos, onde essa contenção de rede é mais provável).
   await targetPage.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {})
 
+  // Conta as abas ANTES do clique — usado depois pra decidir se o clique abriu um
+  // popup de verdade (ver comentário mais abaixo, perto de `pagesAfterClick`).
+  const pagesBeforeClick = context.pages().length
+
   // Clica no botão "Add Damage Entry" com rolagens, retentativas e timeout limite para evitar travamentos
   let clickedAdd = false
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -2836,9 +2857,16 @@ async function openDamageEntryForm(
       .catch(() => {})
   }
 
-  // Se o clique abriu um popup em uma sub-aba, usa a aba mais recente
-  const activePages = context.pages().filter((p) => !p.isClosed())
-  const formPage = activePages[activePages.length - 1] || targetPage
+  // Se o clique abriu um popup em uma sub-aba, é uma página NOVA que apareceu por
+  // causa DESSE clique especificamente — não "a mais recente do contexto inteiro".
+  // Bug real diagnosticado pelo usuário: pegar "a mais recente" sem essa checagem
+  // podia acidentalmente grudar numa aba de VÍDEO de outra pá/turbina, deixada
+  // aberta de propósito esperando revisão manual (nada a ver com este clique),
+  // fazendo o preenchimento da linha atual acontecer em cima do formulário errado.
+  const pagesAfterClick = context.pages().filter((p) => !p.isClosed())
+  const formPage = pagesAfterClick.length > pagesBeforeClick
+    ? pagesAfterClick[pagesAfterClick.length - 1]
+    : targetPage
   await formPage.bringToFront().catch(() => {})
 
   // Verifica se a aba atual realmente é o formulário (e não a página do relatório principal Inspection Report)
@@ -3004,7 +3032,12 @@ export async function runSnowDamageAutomation(
       await closeServiceNowSession()
       auditContext = await getContext(options.headless ?? false)
     }
-    const auditPage = auditContext.pages().find((p) => !p.isClosed()) || (await auditContext.newPage())
+    // SEMPRE abre uma aba nova — mesmo motivo do `authPage` em `runFullAutomation`
+    // (ver comentário lá): abas de vídeo de OUTRAS turbinas/pás ficam abertas de
+    // propósito esperando revisão manual, e "achar qualquer página aberta" no
+    // contexto compartilhado podia acabar pegando uma delas por engano em vez de
+    // uma página genuinamente livre — a auditoria rodava contra a aba errada.
+    const auditPage = await auditContext.newPage()
 
     // Garante sessão logada ANTES de qualquer coisa — antes disso, era preciso
     // clicar em "Abrir p/ Login" manualmente antes de rodar, senão a automação
@@ -3139,6 +3172,22 @@ export async function runSnowDamageAutomation(
     const MAX_ROUNDS = 3
     let currentRoundRows = nonVideoRows
 
+    // Em modo Submissão Automática, a MESMA aba é reaproveitada entre linhas dessa
+    // turbina (design intencional: preenche, submete, clica "Add Damage Entry" de
+    // novo na mesma aba, sem o custo de abrir uma aba nova a cada defeito). Antes,
+    // "qual aba reaproveitar" era decidido buscando `context.pages().find(p =>
+    // !p.isClosed())` no CONTEXTO INTEIRO — bug real diagnosticado pelo usuário:
+    // as abas de VÍDEO ficam abertas de propósito esperando revisão manual (de
+    // QUALQUER pá/turbina já processada nessa sessão, não só a atual), e essa
+    // busca não distinguia "uma aba livre pra reaproveitar" de "a aba de vídeo de
+    // outra pá esperando o humano revisar" — a próxima linha podia acabar
+    // preenchendo o formulário EM CIMA da aba de vídeo errada, misturando dados de
+    // pás diferentes. Corrigido rastreando a página explicitamente numa variável
+    // local (só dessa turbina, só desse loop) em vez de "adivinhar" no contexto
+    // compartilhado — nunca aponta pra aba de vídeo nenhuma, sempre pra própria
+    // aba que este loop mesmo abriu.
+    let sharedAutoSubmitPage: Page | null = null
+
     for (let round = 1; round <= MAX_ROUNDS && currentRoundRows.length > 0; round++) {
       if (round > 1) {
         log(`🔁 Rodada ${round}/${MAX_ROUNDS} de retentativa — ${currentRoundRows.length} linha(s) que falharam antes...`)
@@ -3162,7 +3211,10 @@ export async function runSnowDamageAutomation(
 
         let targetPage: Page
         if (autoSubmit) {
-          targetPage = context.pages().find((p) => !p.isClosed()) || (await context.newPage())
+          if (!sharedAutoSubmitPage || sharedAutoSubmitPage.isClosed()) {
+            sharedAutoSubmitPage = await context.newPage()
+          }
+          targetPage = sharedAutoSubmitPage
         } else {
           // No modo de conferência manual: abre uma NOVA ABA exclusiva no Chrome para cada linha i
           targetPage = await context.newPage()
@@ -3173,12 +3225,8 @@ export async function runSnowDamageAutomation(
         // Compara a URL INTEIRA (com query — é ali que mora o sys_id que distingue
         // um incidente/turbina do outro), não só o caminho antes do "?". Bug real
         // achado na fila overnight: comparando só a base (mesma pra qualquer
-        // incidente do ServiceNow, ex. ".../inspection_report.do"), a aba reaproveitada
-        // da turbina anterior "parecia" já estar no lugar certo pra turbina seguinte
-        // (mesma base, sys_id diferente) e nunca navegava — a automação seguia
-        // preenchendo os dados da turbina nova em cima da página da turbina errada,
-        // travando na seleção do Blade serial number (pá que não existe naquele
-        // incidente).
+        // incidente do ServiceNow), a aba reaproveitada "parecia" já estar no lugar
+        // certo e nunca navegava — preenchia dados em cima da página errada.
         if (targetPage.url() !== incidentUrl) {
           await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
         }
