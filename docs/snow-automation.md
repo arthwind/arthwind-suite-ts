@@ -1689,3 +1689,35 @@ tentativas de scroll, loga quantas ocorrências foram achadas em cada
 escopo e se algum clique não resultou em navegação — se ainda falhar,
 o próximo log vai trazer esse diagnóstico detalhado em vez do mesmo
 aviso genérico de sempre.
+
+## Bug corrigido: aba de checagem de login ficava aberta e era pega por engano na auditoria
+
+Reportado pelo usuário: durante "Realizando auditoria ao vivo...", o
+Chromium "fechou a janela" e ficou tentando auditar pela home do portal
+do ServiceNow, não pelo Inspection Report da turbina.
+
+**Causa raiz**: `runFullAutomation` abre uma aba (`authPage`) só pra
+confirmar que a sessão está logada, navegando ela pra `portalOrigin`
+(home do portal) — mas nunca fechava essa aba depois. Ela ficava aberta
+o resto da execução inteira, sobrevivendo a TODAS as turbinas. O Módulo
+24, ao montar sua própria auditoria, pega "a primeira página
+não-fechada" do contexto (`auditContext.pages().find((p) =>
+!p.isClosed())`) — e podia acabar pegando exatamente essa `authPage`
+esquecida (ainda na home do portal) em vez de abrir uma página nova de
+verdade. Fechar a aba da Fase 0 de uma turbina, nesse cenário, deixava
+só a `authPage` visível — dando a impressão de "fechou a janela e voltou
+pra home do portal" (era literalmente isso que estava acontecendo).
+
+**Fix**: `authPage` agora é fechada depois de confirmar o login — abrindo
+uma aba em branco (`about:blank`) ANTES de fechar, pra nunca zerar as
+abas (janela do Chromium fecha inteira com zero abas). Uma aba em branco
+é segura de deixar por aí: `ensureAuthenticatedPage` sempre navega ela
+pra URL certa depois, sem risco de "achar que já está lá" por engano
+(different de uma aba já em alguma URL real do ServiceNow, como a home
+do portal).
+
+Também adicionado um log (`URL do Inspection Report capturada: ...`)
+logo depois de capturar a URL na Fase 0 — dá pra conferir diretamente no
+log se a URL capturada é mesmo específica da turbina (com algum
+identificador único) ou algo genérico, útil pra descartar de vez uma
+segunda hipótese (SPA sem URL própria por registro) se esse bug persistir.

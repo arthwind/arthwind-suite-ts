@@ -1329,6 +1329,19 @@ export async function runFullAutomation(
     }
   }
 
+  // Fecha essa aba de checagem de login — bug real achado em teste: ela ficava
+  // aberta na home do portal (portalOrigin) pelo resto da execução inteira, e o
+  // Módulo 24 (que pega "a primeira página não-fechada" do contexto pra montar a
+  // auditoria) podia acabar pegando ELA por engano em vez de abrir uma página
+  // nova de verdade — a auditoria ficava tentando (e nunca conseguindo) contra a
+  // home do portal, em vez do Inspection Report da turbina. Abre uma aba em
+  // branco ANTES de fechar, pra nunca zerar as abas (senão a janela do Chromium
+  // fecha inteira) — uma aba em `about:blank` é segura de reaproveitar depois,
+  // porque `ensureAuthenticatedPage` sempre navega ela pra URL certa (não tem
+  // como confundir "já estou lá" com uma página em branco).
+  await context.newPage().catch(() => {})
+  await authPage.close().catch(() => {})
+
   let processed = 0
   let failed = 0
   const errors: string[] = []
@@ -1363,6 +1376,7 @@ export async function runFullAutomation(
       // usuário digitar uma. Fecha essa aba antes de chamar o Módulo 24
       // porque ele abre/gerencia as próprias abas a partir daqui.
       const derivedIncidentUrl = page.url()
+      log(`  ℹ ${prefix} URL do Inspection Report capturada: ${derivedIncidentUrl}`)
       await page.close().catch(() => {})
 
       // Espera o fechamento de verdade se propagar antes de seguir — bug real
