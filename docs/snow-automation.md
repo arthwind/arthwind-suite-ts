@@ -1666,3 +1666,26 @@ anexos), 800ms não é tempo suficiente pra essa chamada terminar.
 (rola + espera 1s + tenta achar o link de novo), ~12s de paciência total
 — mesmo padrão já usado em `findAndOpenIncident` pra esperar o portal
 Angular renderizar.
+
+## Ainda investigando: link achado mas auditoria continua sem confirmar
+
+Testado com a 1.9.6 (mais paciência) — o mesmo aviso "NÃO encontrou a
+tabela" continuou aparecendo, na mesma turbina. A paciência sozinha não
+era o problema (ou não era o único).
+
+**Nova hipótese**: `tryClick` usava `.first()` — se o texto "damage
+report entries" aparece em MAIS de um lugar na página (ex.: duplicado em
+algum elemento decorativo, ou um `<span>` de contagem separado do link
+de verdade), o clique podia "funcionar" (sem erro nenhum, elemento
+visível, clique aceito) sem navegar a lugar nenhum — porque o elemento
+clicado não era o link de verdade.
+
+**Mudança (ainda não confirmada contra o ServiceNow real)**:
+`navigateToDamageEntriesList` agora testa TODAS as ocorrências do texto
+em cada escopo (não só a primeira), e só considera sucesso se a URL da
+página realmente mudar depois do clique — clique que não navega é
+descartado e a próxima ocorrência é tentada. Nas últimas 3 das 15
+tentativas de scroll, loga quantas ocorrências foram achadas em cada
+escopo e se algum clique não resultou em navegação — se ainda falhar,
+o próximo log vai trazer esse diagnóstico detalhado em vez do mesmo
+aviso genérico de sempre.

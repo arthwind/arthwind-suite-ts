@@ -1965,42 +1965,62 @@ export interface LiveAuditResult {
  * abre uma tela de LISTA separada (não é a mesma página do relatório). Precisa de
  * scroll até o final da página primeiro, já que essa seção fica depois do formulário. */
 async function navigateToDamageEntriesList(page: Page, log: LogFn): Promise<boolean> {
-  const tryClick = async (): Promise<boolean> => {
+  const urlBefore = page.url()
+
+  // Testa TODAS as ocorrências do texto (não só a primeira) e só considera sucesso
+  // se a URL de fato mudar depois do clique — bug possível descartado por essa
+  // checagem: clicar em algo visível com o texto certo, mas que não é o link de
+  // verdade (ex.: um <span> decorativo, ou o texto duplicado em outro lugar da
+  // página), o que "parecia" funcionar (clique sem erro) mas não navegava a
+  // lugar nenhum. `debugCounts=true` loga quantas ocorrências foram achadas em
+  // cada escopo, pra saber se o problema é "não achou nada" ou "achou mas não
+  // conseguiu navegar" na próxima rodada de diagnóstico, se ainda falhar.
+  const tryClick = async (debugCounts: boolean): Promise<boolean> => {
     const scopes = [page, ...page.frames()]
-    for (const s of scopes) {
-      // Sem âncora ^...$: o texto real do link pode vir com espaço/quebra de linha extra
-      // ou o badge de contagem colado (ex.: "Damage Report Entries8").
-      const link = s.getByText(/damage report entries/i).first()
-      if (await link.isVisible({ timeout: 800 }).catch(() => false)) {
-        await link.scrollIntoViewIfNeeded().catch(() => {})
-        await link.click({ force: true }).catch(() => {})
-        return true
+    for (let scopeIdx = 0; scopeIdx < scopes.length; scopeIdx++) {
+      const s = scopes[scopeIdx]
+      const candidates = s.getByText(/damage report entries/i)
+      const count = await candidates.count().catch(() => 0)
+      if (debugCounts) {
+        log(`    (escopo ${scopeIdx}: ${count} ocorrência(s) de "damage report entries")`)
+      }
+      for (let i = 0; i < count; i++) {
+        const candidate = candidates.nth(i)
+        const visible = await candidate.isVisible({ timeout: 500 }).catch(() => false)
+        if (!visible) continue
+        await candidate.scrollIntoViewIfNeeded().catch(() => {})
+        await candidate.click({ force: true }).catch(() => {})
+        await page.waitForTimeout(700)
+        if (page.url() !== urlBefore) return true
+        if (debugCounts) {
+          log(`    (escopo ${scopeIdx}, ocorrência ${i + 1}: clicou mas a URL não mudou — tentando próxima ocorrência)`)
+        }
       }
     }
     return false
   }
 
-  if (await tryClick()) {
+  if (await tryClick(false)) {
     log(`  ✓ Clicado no link 'Damage Report Entries' (Related Lists)`)
     return true
   }
 
   // A seção "Related Lists" fica no final do formulário e pode carregar via AJAX
   // DEPOIS do resto da página já estar visível — a contagem ao lado de cada lista
-  // (ex.: "Damage Report Entries 19") vem de uma chamada separada. Achado em teste
-  // real (confirmado com print do usuário: a seção existe rolando até o fim, mas
-  // um scroll + espera fixa de 800ms não bastava — a seção ainda não tinha
-  // carregado nesse ponto). Rola até o fim e tenta várias vezes com intervalo (até
-  // ~12s), em vez de desistir numa única checagem — mesmo padrão de paciência já
-  // usado em `findAndOpenIncident`.
-  for (let attempt = 0; attempt < 12; attempt++) {
+  // (ex.: "Damage Report Entries 19") vem de uma chamada separada. Rola até o fim
+  // e tenta várias vezes com intervalo (até ~15s), com diagnóstico detalhado nas
+  // últimas tentativas caso continue falhando.
+  const MAX_ATTEMPTS = 15
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {})
-    if (await tryClick()) {
-      log(`  ✓ Clicado no link 'Damage Report Entries' (após rolar até o final da página)`)
+    const debugThisAttempt = attempt >= MAX_ATTEMPTS - 3 // só nas últimas 3, evita poluir o log
+    if (await tryClick(debugThisAttempt)) {
+      log(`  ✓ Clicado no link 'Damage Report Entries' (após rolar até o final da página, tentativa ${attempt + 1})`)
       return true
     }
     await page.waitForTimeout(1000)
   }
+  log(`  ⚠ Depois de ${MAX_ATTEMPTS} tentativas, o link "Damage Report Entries" nunca resultou em navegação de verdade.`)
   return false
 }
 
