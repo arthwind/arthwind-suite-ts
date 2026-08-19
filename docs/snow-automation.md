@@ -1832,3 +1832,39 @@ da turbina SEGUINTE sem nenhum ganho real.
   número da entrada (`SNOW Entry #`) de volta na planilha, igual já
   acontecia com defeitos/blanks. Não confirmou -> não submete, aba fica
   aberta pra revisão manual, e a linha é reprocessada como antes.
+
+## Reordenação: vídeo dispara ANTES dos defeitos, não depois
+
+Teste real revelou dois problemas na v1.11.0: nenhuma aba de vídeo
+visível pra acompanhar, e vídeos 3+ estourando o timeout de 180s um
+atrás do outro. Investigando com o usuário: upload de vídeo é lento no
+ServiceNow **por natureza** (processamento do lado do servidor), não
+por disputa de banda entre abas cascateadas — então rodar várias abas
+ao mesmo tempo não piora nem melhora o tempo de cada upload individual.
+
+O que realmente importa é QUANDO esse tempo de espera é gasto. Um
+defeito normal (vários campos em cascata: Sub Component, Failure Type,
+Blade section, etc.) demora bem mais pra preencher, no relógio, do que
+os poucos campos de um vídeo. Mas a Fase 3 (vídeo) só começava DEPOIS
+que a Fase 1 (defeitos) inteira já tinha terminado — desperdiçando
+exatamente o tempo em que o upload do vídeo podia estar rodando de
+graça em segundo plano, sem ninguém checando nada, enquanto o robô
+preenchia os defeitos numa aba totalmente separada.
+
+**Fix** — inverteu a ordem: agora `runSnowDamageAutomation` dispara o
+upload de TODOS os vídeos primeiro (preenche + anexa arquivo, sem
+esperar terminar — extraído pra uma função `fillVideoTab` reaproveitada
+tanto no disparo inicial quanto nas retentativas), guarda as abas
+abertas, e só DEPOIS roda a Fase 1 (defeitos). A checagem/submissão de
+vídeo (Fase 3) roda por último, sobre as abas já abertas — a essa
+altura, depois de todo o tempo gasto preenchendo defeitos, a maioria
+dos uploads já deve ter terminado sozinha, então a checagem tende a ser
+quase instantânea em vez de estourar timeout. Reflexo direto: as abas
+de vídeo já existem e vão terminando DURANTE a Fase 1, então dá pra
+acompanhar e já ir revisando/enviando pro cliente enquanto os defeitos
+ainda estão sendo preenchidos — não precisa esperar tudo terminar.
+
+Efeito colateral bom: como cada vídeo já está aberto numa aba própria
+desde o início, fica mais fácil achar/acompanhar visualmente (era um
+dos sintomas relatados — "não tem nenhuma aba de vídeo pra acompanhar",
+que na verdade era a aba só aparecendo tarde demais, no fim de tudo).

@@ -3170,6 +3170,87 @@ export async function runSnowDamageAutomation(
     let failed = 0
     const errors: string[] = []
 
+    // ─── Fase 0 (vídeo): dispara o upload de TODOS os vídeos ANTES dos defeitos ───
+    // Upload de vídeo é lento no ServiceNow por natureza (processamento do lado do
+    // servidor), não por disputa de banda entre abas — então cascatear várias abas
+    // ao mesmo tempo não ajuda nem atrapalha o tempo de cada upload individual.
+    // O que importa é QUANDO esse tempo de espera é gasto: preencher um defeito
+    // (vários campos em cascata) demora bem mais, no relógio, do que preencher os
+    // poucos campos de um vídeo. Antes, o vídeo só começava a subir DEPOIS que
+    // todos os defeitos já tinham terminado — desperdiçando exatamente o tempo em
+    // que o upload podia estar rodando de graça em segundo plano. Agora dispara
+    // aqui, no início, pra usar o tempo (maior) da Fase 1 como janela de upload —
+    // quando a auditoria de vídeo rodar lá embaixo, depois dos defeitos, a maior
+    // parte já deve ter terminado, então a checagem tende a ser rápida em vez de
+    // estourar timeout.
+    type OpenVideoTab = { row: DamageReportRow; formPage: Page; filler: DamageEntryFiller; expectedFilename: string; prefix: string }
+
+    const fillVideoTab = async (row: DamageReportRow, prefix: string): Promise<OpenVideoTab | 'skip'> => {
+      let context: BrowserContext
+      try {
+        context = await getContext(options.headless ?? false)
+      } catch {
+        await closeServiceNowSession()
+        context = await getContext(options.headless ?? false)
+      }
+
+      const targetPage = await context.newPage()
+      await targetPage.bringToFront().catch(() => {})
+      await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+
+      const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
+      if (existsInSnow) {
+        log(`  ℹ [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
+        await targetPage.close().catch(() => {})
+        return 'skip'
+      }
+
+      const formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
+      if (!formPage) {
+        throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
+      }
+
+      let localPhotos = options.localPhotosDir
+        ? findLocalPhotosFromMap(photosMap, row)
+        : []
+      if (localPhotos.length === 0 && options.localPhotosDir) {
+        localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
+      }
+
+      const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
+      // autoSubmit=false aqui SEMPRE, mesmo em modo Submissão Automática — só
+      // submete depois de confirmar o upload de verdade (feito lá embaixo, depois
+      // da Fase 1), nunca antes.
+      await filler.fill(row, localPhotos, false, false)
+
+      const videoPath = localPhotos.find((p) => isVideoFile(p))
+      const expectedFilename = videoPath ? path.basename(videoPath) : ''
+      log(`  ✓ ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber}.`)
+      return { row, formPage, filler, expectedFilename, prefix }
+    }
+
+    const MAX_VIDEO_ROUNDS = 3
+    let videosFilled = 0
+    let videosFailed = 0
+    let videoOpenTabs: OpenVideoTab[] = []
+
+    if (videoRows.length > 0) {
+      log(`🎬 ${videoRows.length} vídeo(s) — disparando upload de cada um antes dos defeitos, pra usar o tempo de preenchimento da Fase 1 como janela de upload.`)
+      for (let vi = 0; vi < videoRows.length; vi++) {
+        const row = videoRows[vi]
+        const prefix = `[Vídeo ${vi + 1}/${videoRows.length}]`
+        try {
+          const result = await fillVideoTab(row, prefix)
+          if (result !== 'skip') videoOpenTabs.push(result)
+        } catch (err: any) {
+          videosFailed++
+          const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
+          errors.push(msg)
+          log(msg)
+        }
+      }
+    }
+
     // ─── Fase 1+2: Defeitos normais e Blank Images, sequencial (como sempre foi) ───
     // Roda em RODADAS de retentativa automática: linhas que falharem numa rodada
     // (timeout, dropdown travado do SNOW, etc.) são retentadas na rodada seguinte, até
@@ -3350,168 +3431,36 @@ export async function runSnowDamageAutomation(
       log(`ℹ Defeitos/Blanks concluídos! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
     }
 
-    // ─── Fase 3: Vídeos, uma aba por vídeo, em cascata ───
-    // Cada vídeo: abre aba própria, preenche o formulário, dispara o upload SEM
-    // esperar terminar, e já parte pro próximo — evita bloquear a fila inteira
-    // esperando um upload lento terminar. Em modo Conferência Manual o formulário
-    // fica sempre aberto sem clicar Submit (a confirmação final é do inspetor) — e
-    // como não vai submeter mesmo, nem confere o upload, só dispara e segue
-    // (pedido do usuário: checar upload só faz sentido quando a confirmação leva a
-    // alguma ação, senão só atrasa a fila à toa). Em modo Submissão Automática, a
-    // checagem AUTORIZA o Submit — só submete quando o upload for confirmado.
-    //
-    // Depois de abrir TODAS as abas da rodada (não uma de cada vez — é isso que
-    // preserva o ganho de tempo da cascata), roda uma segunda passada CONFERINDO
-    // cada aba: o nome do arquivo de vídeo realmente apareceu como anexo, ou o
-    // upload nunca terminou/falhou? Pedido do usuário: sem essa checagem, um
-    // upload que falhar silenciosamente (rede lenta, timeout do ServiceNow) só
-    // seria percebido se alguém abrisse a aba manualmente e reparasse — numa fila
-    // overnight sem ninguém olhando, isso deixaria vídeo pendente pra descobrir só
-    // depois. Vídeo que não confirma o upload tem a aba descartada e é
-    // reprocessado automaticamente (até `MAX_VIDEO_ROUNDS` rodadas, mesmo padrão
-    // de retentativa da Fase 1) — como os dados já foram preenchidos uma vez, a
-    // auditoria ao vivo da rodada seguinte já teria essa entrada se ela tivesse
-    // sido submetida por engano nesse meio tempo, então o reprocessamento é
-    // seguro. Só depois de esgotar as rodadas um vídeo é reportado como falha de
-    // verdade — nenhum fica "pendurado" esperando checagem manual.
-    const MAX_VIDEO_ROUNDS = 3
-    let videosFilled = 0
-    let videosFailed = 0
-
+    // ─── Fase 3: confere (e, se Submissão Automática, submete) os vídeos disparados
+    // no início — a essa altura, depois do tempo inteiro gasto preenchendo os
+    // defeitos na Fase 1, a maior parte dos uploads já deve ter terminado sozinha.
     if (videoRows.length > 0 && !autoSubmit) {
       // Modo Conferência Manual: o vídeo NUNCA é submetido sozinho de qualquer
-      // forma — o Submit final é sempre do inspetor. Conferir/retentar o upload
-      // aqui só faria sentido se a confirmação decidisse submeter automaticamente,
-      // o que não acontece nesse modo — então não faz sentido travar a fila
-      // esperando essa confirmação (pedido do usuário). Dispara o upload de cada
-      // vídeo, deixa a aba aberta e segue pro próximo, sem conferir nem retentar.
-      log(`🎬 ${videoRows.length} vídeo(s) a preencher — modo manual, cada um numa aba própria (upload disparado; revisão e Submit ficam com você, sem conferência automática de upload).`)
-
-      for (let vi = 0; vi < videoRows.length; vi++) {
-        const row = videoRows[vi]
-        const prefix = `[Vídeo ${vi + 1}/${videoRows.length}]`
-        try {
-          let context: BrowserContext
-          try {
-            context = await getContext(options.headless ?? false)
-          } catch {
-            await closeServiceNowSession()
-            context = await getContext(options.headless ?? false)
-          }
-
-          const targetPage = await context.newPage()
-          await targetPage.bringToFront().catch(() => {})
-          await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-
-          const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
-          if (existsInSnow) {
-            log(`  ℹ [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
-            await targetPage.close().catch(() => {})
-            continue
-          }
-
-          const formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
-          if (!formPage) {
-            throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
-          }
-
-          let localPhotos = options.localPhotosDir
-            ? findLocalPhotosFromMap(photosMap, row)
-            : []
-          if (localPhotos.length === 0 && options.localPhotosDir) {
-            localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
-          }
-
-          const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
-          await filler.fill(row, localPhotos, false, false)
-          videosFilled++
-          log(`  ✓ ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber}.`)
-        } catch (err: any) {
-          videosFailed++
-          const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
-          errors.push(msg)
-          log(msg)
-        }
-      }
-
+      // forma — o Submit final é sempre do inspetor. Conferir o upload aqui só
+      // faria sentido se a confirmação decidisse submeter automaticamente, o que
+      // não acontece nesse modo — então não confere nada, só reporta quantos
+      // foram disparados no início; as abas seguem abertas pra revisão manual.
+      videosFilled = videoOpenTabs.length
       log(`🎬 Vídeos: ${videosFilled} disparado(s) aguardando revisão manual, ${videosFailed} falha(s) ao preencher.`)
     } else if (videoRows.length > 0 && autoSubmit) {
       // Submissão Automática: só vale a pena conferir o upload porque a
       // confirmação AUTORIZA o Submit — sem essa checagem o formulário submeteria
-      // sem esperar o anexo terminar de subir. Preenche todos os vídeos da rodada
-      // (sem esperar upload), confere cada aba depois de todas abertas (mesma
-      // cascata da Fase 1), e só submete quando o upload for confirmado de
-      // verdade. Não confirmou -> aba fica aberta sem submeter, pra revisão
-      // manual, e a linha é reprocessada até `MAX_VIDEO_ROUNDS`.
-      log(`🎬 ${videoRows.length} vídeo(s) a preencher — Submissão Automática: confere o upload e só submete quando confirmar.`)
+      // sem esperar o anexo terminar de subir. Confirmou -> submete e grava o
+      // número da entrada na planilha. Não confirmou -> descarta a aba e
+      // reprocessa a linha (reabre e repreenche do zero) até `MAX_VIDEO_ROUNDS`
+      // rodadas — como o vídeo foi disparado bem antes (não logo antes da
+      // checagem), a maioria já deve confirmar na 1ª rodada.
+      log(`🎬 Conferindo upload dos ${videoOpenTabs.length} vídeo(s) disparados no início — Submissão Automática: só submete quando confirmar.`)
 
-      type OpenVideoTab = { row: DamageReportRow; formPage: Page; filler: DamageEntryFiller; expectedFilename: string; prefix: string }
-      let videoRoundRows = videoRows
+      let tabsToCheck = videoOpenTabs
 
-      for (let round = 1; round <= MAX_VIDEO_ROUNDS && videoRoundRows.length > 0; round++) {
+      for (let round = 1; round <= MAX_VIDEO_ROUNDS && tabsToCheck.length > 0; round++) {
         if (round > 1) {
-          log(`🔁 Rodada ${round}/${MAX_VIDEO_ROUNDS} de vídeo — ${videoRoundRows.length} upload(s) não confirmado(s), reprocessando...`)
+          log(`🔁 Rodada ${round}/${MAX_VIDEO_ROUNDS} de vídeo — ${tabsToCheck.length} upload(s) não confirmado(s), reprocessando...`)
         }
 
-        // 3a) Preenche todos os vídeos da rodada, uma aba cada, sem esperar upload.
-        const openTabs: OpenVideoTab[] = []
-        for (let vi = 0; vi < videoRoundRows.length; vi++) {
-          const row = videoRoundRows[vi]
-          const prefix = `[Vídeo ${round > 1 ? `R${round} ` : ''}${vi + 1}/${videoRoundRows.length}]`
-          try {
-            let context: BrowserContext
-            try {
-              context = await getContext(options.headless ?? false)
-            } catch {
-              await closeServiceNowSession()
-              context = await getContext(options.headless ?? false)
-            }
-
-            const targetPage = await context.newPage()
-            await targetPage.bringToFront().catch(() => {})
-            await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-
-            const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
-            if (existsInSnow) {
-              log(`  ℹ [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
-              await targetPage.close().catch(() => {})
-              continue
-            }
-
-            const formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
-            if (!formPage) {
-              throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
-            }
-
-            let localPhotos = options.localPhotosDir
-              ? findLocalPhotosFromMap(photosMap, row)
-              : []
-            if (localPhotos.length === 0 && options.localPhotosDir) {
-              localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
-            }
-
-            const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
-            // autoSubmit=false aqui SEMPRE (mesmo em modo Submissão Automática) —
-            // só submete depois de confirmar o upload na passada 3b, nunca antes.
-            await filler.fill(row, localPhotos, false, false)
-
-            const videoPath = localPhotos.find((p) => isVideoFile(p))
-            const expectedFilename = videoPath ? path.basename(videoPath) : ''
-            openTabs.push({ row, formPage, filler, expectedFilename, prefix })
-            log(`  ✓ ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber}.`)
-          } catch (err: any) {
-            videosFailed++
-            const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
-            errors.push(msg)
-            log(msg)
-          }
-        }
-
-        // 3b) Confere cada aba aberta — só agora, com todos os uploads já em
-        // andamento em paralelo, é que espera cada um confirmar de verdade — e só
-        // essa confirmação autoriza o Submit.
         const failedThisRound: DamageReportRow[] = []
-        for (const tab of openTabs) {
+        for (const tab of tabsToCheck) {
           if (!tab.expectedFilename) {
             // Não deu pra identificar o arquivo de vídeo esperado (nome local não
             // achado) — não dá pra confirmar o upload, então não submete; fica
@@ -3552,7 +3501,24 @@ export async function runSnowDamageAutomation(
           log(`⚠ ${failedThisRound.length} vídeo(s) não confirmaram upload mesmo após ${round} rodadas — reportando como falha, não vai tentar de novo.`)
           break
         }
-        videoRoundRows = failedThisRound
+
+        // Reabre e repreenche do zero as linhas que falharam, pra tentar de novo
+        // na próxima rodada.
+        const reopened: OpenVideoTab[] = []
+        for (let vi = 0; vi < failedThisRound.length; vi++) {
+          const row = failedThisRound[vi]
+          const prefix = `[Vídeo R${round + 1} ${vi + 1}/${failedThisRound.length}]`
+          try {
+            const result = await fillVideoTab(row, prefix)
+            if (result !== 'skip') reopened.push(result)
+          } catch (err: any) {
+            videosFailed++
+            const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
+            errors.push(msg)
+            log(msg)
+          }
+        }
+        tabsToCheck = reopened
       }
 
       log(`🎬 Vídeos concluídos: ${videosFilled} submetido(s) automaticamente, ${videosFailed} falha(s).`)
