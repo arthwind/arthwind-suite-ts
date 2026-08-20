@@ -586,6 +586,15 @@
   },
   {
     "windfarm": "Lagoa dos Ventos V",
+    "turbine": "VSR07-03-90640",
+    "turbinePrefix": "VSR07-03",
+    "component": "Rotor blade 1",
+    "serial": "T3 811 0492 0164",
+    "bladeSn": "492",
+    "setNumber": "0164"
+  },
+  {
+    "windfarm": "Lagoa dos Ventos V",
     "turbine": "VSR07-07-90635",
     "turbinePrefix": "VSR07-07",
     "component": "Rotor blade 1",
@@ -1086,6 +1095,15 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0588 0199",
     "bladeSn": "588",
+    "setNumber": "0199"
+  },
+  {
+    "windfarm": "Lagoa dos Ventos V",
+    "turbine": "VSR22-07-90665",
+    "turbinePrefix": "VSR22-07",
+    "component": "Rotor blade 2",
+    "serial": "A1 811 0624 0199",
+    "bladeSn": "624",
     "setNumber": "0199"
   },
   {

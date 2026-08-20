@@ -2014,3 +2014,29 @@ travar.
   (criado ou já existente), roda `verifyFilled` → extrai o número IR →
   gera o Daily Activity Report → sobe como anexo — tudo ANTES de fechar
   a aba e chamar o Módulo 24 (defeitos).
+
+## Duas pás faltando em blade_sets.json, achadas pelo usuário em teste real
+
+Usuário reportou pelo dropdown "Blade serial number" do ServiceNow (na
+turbina VSR22-07-90665, só apareciam 2 seriais completos + um "588"
+truncado) que uma pá parecia faltar na nossa base. Rodei uma varredura
+completa nas 70 turbinas de `blade_sets.json` procurando qualquer uma
+sem as 3 "Rotor blade 1/2/3" — achei mais uma além dessa:
+
+- **VSR22-07-90665** — faltava Rotor blade 2 (só tinha 1 e 3).
+- **VSR07-03-90640** — faltava Rotor blade 1 (só tinha 2 e 3).
+
+(O "588" truncado no dropdown do ServiceNow é um problema separado, do
+lado de lá — esse combobox é preenchido pelo cadastro da turbina no
+próprio ServiceNow, não pelo nosso `blade_sets.json`.)
+
+Nenhuma outra turbina tinha esse problema (verificado: sem bladeSn/
+serial duplicado dentro da mesma turbina, sem campo vazio, sem
+`component` fora do padrão). Usuário forneceu os seriais reais:
+- VSR22-07-90665 Rotor blade 2: `A1 811 0624 0199`
+- VSR07-03-90640 Rotor blade 1: `T3 811 0492 0164`
+
+Ambos batem com o Set das pás irmãs da mesma turbina (0199 e 0164
+respectivamente) — adicionados em `blade_sets.json`, agrupados junto
+das outras pás da mesma turbina. Base agora com 210 pás em 70 turbinas,
+todas com as 3 pás completas.
