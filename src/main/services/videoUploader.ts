@@ -34,9 +34,18 @@ export async function enviarVideosDrive(
       return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
     }
 
-    // 1. Escaneamento recursivo da pasta local à procura de pastas "360 watermark" ou "360 watermarked"
+    // 1. Escaneamento recursivo da pasta local à procura de pastas de output de
+    // marca d'água. Match por SUBSTRING (contém "360" E "watermark"), não mais
+    // igualdade exata — bug real achado pelo usuário: com só 1 pá pronta (as
+    // outras ainda em processamento), a pasta gerada pela ArthFilm 360 Studio pra
+    // essa pá isolada não batia com o nome exato esperado (variação de
+    // nomenclatura ainda não confirmada — ex: sufixo, numeração, etc.), e a
+    // varredura silenciosamente considerava que não existia pasta nenhuma,
+    // mesmo achando 1 pasta de vídeo de verdade no disco. Substring é bem mais
+    // tolerante a variações e não deveria mais deixar passar uma pasta real.
     sendLog(`Escaneando pasta local por diretórios de output de marca d'água...`, 'info')
     const localWatermarkDirs: string[] = []
+    const allDirNamesScanned: string[] = []
 
     function scanDir(dir: string) {
       const list = fs.readdirSync(dir, { withFileTypes: true })
@@ -44,7 +53,8 @@ export async function enviarVideosDrive(
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
           const normName = normalize(entry.name)
-          if (normName === '360 watermark' || normName === '360 watermarked') {
+          allDirNamesScanned.push(entry.name)
+          if (normName.includes('360') && normName.includes('watermark')) {
             localWatermarkDirs.push(fullPath)
           } else if (!entry.name.startsWith('.')) {
             scanDir(fullPath)
@@ -58,6 +68,12 @@ export async function enviarVideosDrive(
 
     if (localWatermarkDirs.length === 0) {
       sendLog(`Nenhuma pasta de vídeos (ex: '360 WATERMARKED') foi encontrada na turbina local.`, 'warning')
+      // Loga todas as pastas realmente encontradas na varredura — se uma pasta de
+      // vídeo de verdade estiver aí com um nome diferente do esperado, fica óbvio
+      // no log em vez de só "não achei nada".
+      if (allDirNamesScanned.length > 0) {
+        sendLog(`   Pastas encontradas na varredura: ${allDirNamesScanned.join(', ')}`, 'warning')
+      }
       return { success: true, copiedFolders: 0, copiedFiles: 0 }
     }
 
