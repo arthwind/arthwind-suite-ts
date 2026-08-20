@@ -1937,3 +1937,80 @@ na planilha de origem), que na prática não é confiável.
    máquina de usuário que já tenha uma cópia antiga (e com o mesmo bug)
    seedada em `%APPDATA%/ArthwindSuite/blade_sets.json` — a derivação
    roda em cima de QUALQUER cópia, não depende de re-seedar o arquivo.
+
+## Feature: Daily Activity Report gerado e anexado automaticamente + auditoria dupla
+
+Pedido do usuário: toda tela de Inspection Report/Add Damage Entry no
+ServiceNow mostra um bloco "Instructions(Mandatory)" pedindo pra baixar
+um molde de logbook diário, preencher e subir de volta como anexo, com
+o número do relatório no nome do arquivo — "senão não será
+considerado". Além disso, pedido de uma segunda auditoria: conferir se
+os campos do PRÓPRIO Inspection Report ficaram preenchidos certos antes
+de partir pra auditoria dos defeitos.
+
+**Estrutura do Daily Activity Report** (confirmada analisando um
+exemplo real, `Daily Activity Report_IR0066855.xlsx`, aba `Activities`):
+cabeçalho fixo nas linhas 1-4, 3 linhas de dados (uma por pá, sempre
+linhas 5/6/7) com Date/Blade Serial/Team Supervisor/Technician
+1/Activity/Details of Activity/Working Time preenchidos, e colunas
+W/X/Y (# of Techs, Total hours, Techs x Hour) como FÓRMULAS que já
+vêm no molde — não são preenchidas na mão. `Activity` sempre "Inspection
+Internal" (valor real usado no exemplo), `Details of Activity` sempre
+"Blade 1/2/3 Completed" (na mesma ordem Blade A/B/C já usada pro resto
+do Inspection Report — pedido do usuário: "casar a linha de Pitch 1,
+Pitch 2 e Pitch 3 com Blade A, Blade B e Blade C igual está no
+formulário"), Working Time fixo em 1.5h (idem exemplo real).
+
+**Número do relatório (IR######)**: é DIFERENTE do número do INC (ex:
+tela mostra "INC3034409", mas o arquivo anexado se chama
+"IR0066855..."). Achado importante do usuário: esse número já está
+embutido no próprio texto do bloco de instruções — a frase "Example:
+Daily Activity Report_IR0066857" não é um exemplo genérico, é o número
+de VERDADE daquela turbina especificamente. `extractDailyReportIrNumber`
+só procura esse texto na tela e extrai o que vem depois de "Daily
+Activity Report" — não precisou de nenhum seletor de campo dedicado.
+
+**Achado real ao implementar**: o exemplo original (`Daily Activity
+Report_IR0066855.xlsx`) trava o ExcelJS pra sempre — `readFile` nunca
+resolve nem rejeita, testado isolado e confirmado até no arquivo
+original sem nenhuma edição (openpyxl consegue ler, mas avisa "Data
+Validation extension is not supported", sinal de que o arquivo usa
+alguma extensão XML de Excel mais nova que o ExcelJS não sabe processar
+e trava tentando). Não dava pra usar esse arquivo (nem uma cópia
+"limpa" dele) como molde. Solução: gerar um molde NOVO do zero
+(openpyxl, só a aba "Activities" com cabeçalho E as fórmulas W/X/Y nas
+linhas 5-7 — sem as abas ReadMe/dropdowns/Variables do original, que
+são só ajuda visual pro humano, não afetam o ServiceNow aceitar o
+anexo) — confirmado que o ExcelJS lê e escreve esse molde novo sem
+travar.
+
+**Fix/Feature**:
+- `resources/daily_activity_report_template.xlsx` — molde em branco
+  empacotado no instalador, gerado do zero (não é uma cópia do exemplo
+  real — ver achado acima), com a aba "Activities", cabeçalho e as
+  fórmulas W/X/Y já nas linhas 5-7. Não depende de baixar nada do
+  ServiceNow a cada turbina.
+- `generateDailyActivityReport(...)` (`snowAutomation.ts`) — preenche o
+  molde via ExcelJS com os dados da turbina + `DAILY_REPORT_LEADER`
+  fixo ("Allan Thiago", único valor válido hoje porque só tem o parque
+  Lagoa dos Ventos cadastrado — vira configurável por windfarm se
+  entrar um parque novo) + técnico ALTERNADO entre "Raimundo Nonato" e
+  "Gabriel Lima" a cada turbina (pedido do usuário: não é informação
+  relevante, só precisa estar preenchida).
+- `InspectionReportFiller.uploadAttachment(filePath, label)` — reaproveita
+  o mesmo botão "Add attachments" e a mesma rede de segurança contra
+  abrir aba nova sem querer já usada pras fotos/vídeos de defeito.
+- `InspectionReportFiller.verifyFilled(data)` — segunda auditoria: lê de
+  volta (não confia que "preencheu" = "salvou") Responsible technicians,
+  Inspection Start/End Date, Access method, Blade type, Purchase Order,
+  Blade A/B/C serial number e Blade set number, comparando com o que
+  devia estar lá. Roda tanto pra Inspection Report recém-criado quanto
+  pra um que já existia (`state === 'show'`) — SEMPRE lê a tela, nunca
+  assume. Só reporta divergências (não trava a turbina), porque um
+  report 'show' antigo pode legitimamente ter outro técnico/data.
+- `ServiceNowFormFiller.readTextValue(label)` — contraparte de leitura
+  do `fillText`, usada pela auditoria acima.
+- Wiring em `runFullAutomation`: depois de garantir o Inspection Report
+  (criado ou já existente), roda `verifyFilled` → extrai o número IR →
+  gera o Daily Activity Report → sobe como anexo — tudo ANTES de fechar
+  a aba e chamar o Módulo 24 (defeitos).

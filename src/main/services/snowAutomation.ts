@@ -157,6 +157,25 @@ class ServiceNowFormFiller {
     return mainFrame || this.page
   }
 
+  /** Lê o valor atual de um campo de texto pelo label — contraparte de leitura do
+   * `fillText`, usada pra CONFERIR (não preencher) se o que está salvo na tela bate
+   * com o que devia ter sido preenchido. */
+  protected async readTextValue(fieldLabel: string): Promise<string> {
+    const scope = this.getScope()
+    const locators = [
+      scope.getByLabel(fieldLabel, { exact: false }).first(),
+      scope.locator(`textarea[aria-label*="${fieldLabel}"], input[aria-label*="${fieldLabel}"]`).first()
+    ]
+    for (const field of locators) {
+      try {
+        if (await field.isVisible({ timeout: 2000 }).catch(() => false)) {
+          return ((await field.inputValue().catch(() => '')) || '').trim()
+        }
+      } catch {}
+    }
+    return ''
+  }
+
   /** Lê o texto atualmente mostrado no container visível do combobox (o que ficou
    * selecionado) — usada por `selectFromComboBox` pra CONFERIR se o clique realmente
    * selecionou o valor certo, em vez de assumir que "clicou em algo" = "selecionou o
@@ -907,6 +926,119 @@ const INSPECTION_REPORT_FIXED = {
   purchaseOrder: '0000000014'
 }
 
+// ─── Daily Activity Report — anexo obrigatório de toda tela de Inspection Report ──
+// A própria tela do ServiceNow avisa (bloco "Instructions(Mandatory)" visível em
+// toda página com "Add Damage Entry"): tem que baixar um molde de logbook diário,
+// preencher e subir de volta como anexo, com o número do relatório (IR######, NÃO
+// o INC) no nome do arquivo — senão "não será considerado". Pedido do usuário: a
+// automação gera esse arquivo (usando o molde empacotado, `deriveSetNumberFromSerial`-
+// style — sem baixar nada do ServiceNow) e sobe sozinha, junto com o Inspection Report.
+
+/** Nome do "líder" da equipe — fixo pro parque Lagoa dos Ventos (único cadastrado em
+ * blade_sets.json hoje). Se um parque novo entrar na base, isso precisa virar
+ * configurável por windfarm em vez de constante única. */
+const DAILY_REPORT_LEADER = 'Allan Thiago'
+const DAILY_REPORT_TECHNICIANS = ['Raimundo Nonato', 'Gabriel Lima']
+
+function findDailyReportTemplate(): string | null {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'resources', 'daily_activity_report_template.xlsx'),
+    path.join(__dirname, '..', '..', '..', 'resources', 'daily_activity_report_template.xlsx'),
+    path.join(__dirname, 'resources', 'daily_activity_report_template.xlsx')
+  ]
+  return candidates.find((p) => fs.existsSync(p)) ?? null
+}
+
+function parseDateBR(s: string): Date | null {
+  const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (!m) return null
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]))
+}
+
+/** Gera o Daily Activity Report preenchido a partir do molde empacotado — 3 linhas
+ * (uma por pá, na MESMA ordem Blade A/B/C já usada no resto do Inspection Report),
+ * "Blade 1/2/3 Completed" fixo em Details of Activity, "Inspection Internal" fixo
+ * em Activity (mesmo valor do exemplo real de referência), 1.5h de Working Time
+ * (idem). Técnico alterna entre os 2 nomes da campanha por turbina — não é
+ * informação relevante pro cliente, só precisa estar preenchido (pedido do
+ * usuário). Retorna `null` se o molde não foi encontrado (não trava o resto do
+ * fluxo — só loga o aviso e segue sem o anexo). */
+async function generateDailyActivityReport(
+  data: InspectionReportData,
+  inspectionDate: string,
+  technicianIndex: number,
+  irNumber: string,
+  log: LogFn
+): Promise<string | null> {
+  const templatePath = findDailyReportTemplate()
+  if (!templatePath) {
+    log(`  ⚠ Molde do Daily Activity Report não encontrado (resources/daily_activity_report_template.xlsx) — pulando anexo.`)
+    return null
+  }
+
+  const dateVal = parseDateBR(inspectionDate)
+  if (!dateVal) {
+    log(`  ⚠ Data de inspeção "${inspectionDate}" não bateu com o formato DD/MM/YYYY — pulando Daily Activity Report.`)
+    return null
+  }
+
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(templatePath)
+  const ws = wb.getWorksheet('Activities')
+  if (!ws) {
+    log(`  ⚠ Molde do Daily Activity Report sem aba "Activities" — pulando anexo.`)
+    return null
+  }
+
+  const blades = [data.bladeA.serial, data.bladeB.serial, data.bladeC.serial]
+  const technician = DAILY_REPORT_TECHNICIANS[technicianIndex % DAILY_REPORT_TECHNICIANS.length]
+  const rowNums = [5, 6, 7]
+  let filledAny = false
+
+  for (let i = 0; i < 3; i++) {
+    const serial = blades[i]
+    if (!serial) continue
+    const row = rowNums[i]
+    ws.getCell(`A${row}`).value = dateVal
+    ws.getCell(`B${row}`).value = serial
+    ws.getCell(`D${row}`).value = DAILY_REPORT_LEADER
+    ws.getCell(`E${row}`).value = technician
+    ws.getCell(`J${row}`).value = 'Inspection Internal'
+    ws.getCell(`K${row}`).value = `Blade ${i + 1} Completed`
+    ws.getCell(`L${row}`).value = 1.5
+    filledAny = true
+  }
+
+  if (!filledAny) {
+    log(`  ⚠ Nenhuma pá com serial conhecido pro Daily Activity Report — pulando anexo.`)
+    return null
+  }
+
+  const outPath = path.join(os.tmpdir(), `Daily Activity Report_${irNumber}.xlsx`)
+  await wb.xlsx.writeFile(outPath)
+  return outPath
+}
+
+/** Acha o número do relatório (IR######, formato diferente do INC) — a própria
+ * tela expõe ele dentro do bloco de instruções obrigatórias ("Example: Daily
+ * Activity Report_IR0066857"), então não precisa de um seletor dedicado: procura o
+ * texto visível e extrai o que vem depois de "Daily Activity Report" (confirmado
+ * pelo usuário: esse "exemplo" no texto não é genérico, é o número de verdade
+ * daquela turbina). */
+async function extractDailyReportIrNumber(page: Page, log: LogFn): Promise<string | null> {
+  const scopes = [page, ...page.frames()]
+  for (const s of scopes) {
+    const el = s.getByText(/Daily Activity Report[_\s-]/i).first()
+    if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const text = ((await el.textContent().catch(() => '')) || '')
+      const m = text.match(/Daily Activity Report[_\s-]+([A-Za-z]{1,3}\d{4,})/i)
+      if (m) return m[1].toUpperCase()
+    }
+  }
+  log(`  ⚠ Não achou o número do relatório (IR######) no texto de instruções da tela.`)
+  return null
+}
+
 class InspectionReportFiller extends ServiceNowFormFiller {
   async fill(data: InspectionReportData): Promise<boolean> {
     this.log(`Preenchendo Inspection Report — technician: ${data.technician}, data: ${data.inspectionStartDate}`)
@@ -970,6 +1102,89 @@ class InspectionReportFiller extends ServiceNowFormFiller {
       this.log(`  ⚠ Inspection Report submetido, mas a página não confirmou carregamento em ~30s — seguindo mesmo assim.`)
     }
     return true
+  }
+
+  /** Anexa um arquivo já gerado (o Daily Activity Report) na tela do Inspection
+   * Report — mesmo botão "Add attachments" (📎) usado pras fotos/vídeos de
+   * defeito, mesma rede de segurança contra abrir aba nova sem querer. */
+  async uploadAttachment(filePath: string, label: string): Promise<boolean> {
+    const scope = this.getScope()
+    const attachmentBtn = scope
+      .locator('.attachment-button, [title*="attachment" i]')
+      .or(scope.getByText(/add attachments?/i))
+      .or(scope.locator('a, button', { hasText: /add attachments?/i }))
+      .first()
+
+    if (!(await attachmentBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
+      this.log(`  ⚠ Botão "Add attachments" não encontrado — não deu pra subir ${label}.`)
+      return false
+    }
+
+    const pagesBefore = this.page.context().pages().length
+    const fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null)
+    await attachmentBtn.click({ force: true }).catch(() => {})
+    const fileChooser = await fileChooserPromise
+
+    const pagesNow = this.page.context().pages()
+    if (pagesNow.length > pagesBefore) {
+      for (const extraPage of pagesNow.slice(pagesBefore)) {
+        if (extraPage !== this.page && !extraPage.isClosed()) await extraPage.close().catch(() => {})
+      }
+    }
+
+    if (!fileChooser) {
+      this.log(`  ⚠ Não abriu o seletor de arquivo pra anexar ${label}.`)
+      return false
+    }
+
+    await fileChooser.setFiles([filePath])
+    this.log(`  ✓ ${label} anexado: ${path.basename(filePath)}`)
+    await this.page.waitForTimeout(1500)
+    return true
+  }
+
+  /** Segunda auditoria pedida pelo usuário: confere se os dados que a automação
+   * preencheu no Inspection Report realmente estão salvos na tela ANTES de seguir
+   * pra auditoria dos defeitos — pega de cara um campo que "pareceu" preencher mas
+   * não colou (mesmo tipo de bug já visto no Select2 dos defeitos), sem esperar o
+   * usuário notar só depois de já ter subido tudo. Roda tanto pra 'create' (recém
+   * submetido) quanto pra 'show' (já existia) — não assume nada, sempre lê a tela. */
+  async verifyFilled(data: InspectionReportData): Promise<{ ok: boolean; mismatches: string[] }> {
+    const mismatches: string[] = []
+
+    const checkText = async (label: string, expected: string | null) => {
+      if (!expected) return
+      const actual = await this.readTextValue(label)
+      if (actual.trim() !== expected.trim()) {
+        mismatches.push(`${label}: esperado "${expected}", achado "${actual || '(vazio)'}"`)
+      }
+    }
+    const checkCombo = async (label: string, expected: string) => {
+      const actual = await this.readComboBoxValue(label)
+      if (!actual.toLowerCase().includes(expected.toLowerCase())) {
+        mismatches.push(`${label}: esperado "${expected}", achado "${actual || '(vazio)'}"`)
+      }
+    }
+
+    await checkText('Responsible technicians', data.technician)
+    await checkText('Inspection Start Date', data.inspectionStartDate)
+    await checkText('Inspection End Date', data.inspectionStartDate)
+    await checkCombo('Access method', INSPECTION_REPORT_FIXED.accessMethod)
+    await checkCombo('Blade type', INSPECTION_REPORT_FIXED.bladeType)
+    await checkText('Purchase Order', INSPECTION_REPORT_FIXED.purchaseOrder)
+    await checkText('Blade A serial number', data.bladeA.serial)
+    await checkText('Blade B serial number', data.bladeB.serial)
+    await checkText('Blade C serial number', data.bladeC.serial)
+    await checkText('Blade set number', data.bladeSetNumber)
+
+    if (mismatches.length === 0) {
+      this.log(`  ✓ Auditoria do Inspection Report: todos os campos conferidos batem.`)
+    } else {
+      this.log(`  ⚠ Auditoria do Inspection Report encontrou ${mismatches.length} divergência(s):`)
+      for (const m of mismatches) this.log(`    - ${m}`)
+    }
+
+    return { ok: mismatches.length === 0, mismatches }
   }
 }
 
@@ -1386,13 +1601,35 @@ export async function runFullAutomation(
         throw new Error(`Não conseguiu clicar em "${state === 'create' ? 'Create' : 'Show'} Inspection Report".`)
       }
 
+      const data = buildInspectionReportData(entry.wtg, entry.dataColeta, technician)
+      const filler = new InspectionReportFiller(page, log)
+
       if (state === 'create') {
-        const data = buildInspectionReportData(entry.wtg, entry.dataColeta, technician)
-        const filler = new InspectionReportFiller(page, log)
         const submitted = await filler.fill(data)
         if (!submitted) throw new Error('Falha ao submeter o Inspection Report.')
       } else {
         log(`  ✓ ${prefix} Inspection Report de ${entry.wtg} já existia — indo direto pros defeitos.`)
+      }
+
+      // Segunda auditoria pedida pelo usuário: confere se o que devia estar
+      // preenchido no Inspection Report realmente está salvo na tela ANTES de
+      // seguir pros defeitos — não trava a turbina se achar divergência (só
+      // reporta), porque casos 'show' de report já existente há muito tempo
+      // podem legitimamente ter sido preenchidos com outro técnico/data.
+      await filler.verifyFilled(data)
+
+      // Daily Activity Report: anexo obrigatório em toda tela de Inspection
+      // Report (instrução visível na própria página), com o número do relatório
+      // (IR######, não o INC) no nome do arquivo — esse número está embutido no
+      // próprio texto de instruções, não precisa de campo separado.
+      const irNumber = await extractDailyReportIrNumber(page, log)
+      if (irNumber) {
+        const reportPath = await generateDailyActivityReport(data, entry.dataColeta, i, irNumber, log)
+        if (reportPath) {
+          await filler.uploadAttachment(reportPath, 'Daily Activity Report')
+        }
+      } else {
+        log(`  ⚠ ${prefix} Não achou o número do relatório na tela — Daily Activity Report não foi gerado.`)
       }
 
       // A página já está onde o Módulo 24 espera estar depois de receber uma
