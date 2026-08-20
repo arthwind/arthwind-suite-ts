@@ -372,12 +372,6 @@ export default function SnowAutomationModule({ D }) {
           <div style={{ fontSize: '15px', fontWeight: 700, color: D.textPrimary }}>
             🚀 Automação Completa
           </div>
-          <div style={{ fontSize: '11.5px', color: D.textMuted, lineHeight: '1.5' }}>
-            Acha o INC, decide Create/Show Inspection Report, preenche o cabeçalho
-            se precisar, e já sobe os defeitos + vídeos da pasta local da turbina —
-            sem precisar de nenhuma URL de Damage Report, só o INC (da planilha) e
-            a pasta abaixo.
-          </div>
 
           <div className="form-group" style={{ margin: 0 }}>
             <div className="field-label" style={{ color: D.textMuted, fontSize: '12px' }}>Planilha de controle (Turbina/INC/Data Coleta)</div>
@@ -469,6 +463,22 @@ export default function SnowAutomationModule({ D }) {
           </div>
         </div>
 
+        <label style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          fontWeight: 600,
+          color: D.textPrimary,
+          cursor: 'pointer',
+          border: `1.5px solid ${autoSubmit ? accent : D.borderLight}`,
+          borderRadius: '8px',
+          padding: '10px 12px'
+        }}>
+          <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={busy || dryRun} />
+          Submissão Automática (desativado = apenas preenche, você revisa e submete)
+        </label>
+
         <details style={{
           border: `1px solid ${D.borderLight}`,
           borderRadius: '10px',
@@ -486,18 +496,6 @@ export default function SnowAutomationModule({ D }) {
           </summary>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px 8px 12px' }}>
-
-        <div style={{
-          background: `${accent}12`,
-          border: `1px solid ${accent}40`,
-          borderRadius: '8px',
-          padding: '10px',
-          fontSize: '11.5px',
-          color: D.textSecond,
-          lineHeight: '1.5'
-        }}>
-          Upload de fotos aprimorado: envia automaticamente as 2 fotos do Módulo 23 (pic1 com polígono desenhado + pic2 regional) da pasta local.
-        </div>
 
         {/* Planilha */}
         <div className="form-group">
@@ -530,9 +528,6 @@ export default function SnowAutomationModule({ D }) {
                 {localPhotosDir ? localPhotosDir.split('\\').pop() : 'Selecione a pasta Fotos/ (opcional)'}
               </span>
             </div>
-          </div>
-          <div style={{ fontSize: '10px', color: D.textMuted, marginTop: '4px' }}>
-            Se selecionada, envia pic1 (polígono) + pic2 (zoom regional). Se vazia, baixa do link.
           </div>
         </div>
 
@@ -692,9 +687,6 @@ export default function SnowAutomationModule({ D }) {
               style={{ width: '50%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }}
             />
           </div>
-          <div style={{ fontSize: '10px', color: D.textMuted, marginTop: '4px' }}>
-            Vazio = processa todas as linhas das pás selecionadas acima.
-          </div>
         </div>
 
         {/* Opções de execução */}
@@ -711,10 +703,6 @@ export default function SnowAutomationModule({ D }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: 'pointer' }}>
             <input type="checkbox" checked={headless} onChange={(e) => setHeadless(e.target.checked)} disabled={busy} />
             Rodar em segundo plano (sem mostrar o navegador)
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: dryRun ? 'not-allowed' : 'pointer', opacity: dryRun ? 0.5 : 1 }}>
-            <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={busy || dryRun} />
-            Submeter formulário automaticamente (desativado = apenas preenche)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: D.textSecond, cursor: 'pointer' }}>
             <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} disabled={busy} />

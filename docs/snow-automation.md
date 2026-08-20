@@ -2040,3 +2040,26 @@ Ambos batem com o Set das pás irmãs da mesma turbina (0199 e 0164
 respectivamente) — adicionados em `blade_sets.json`, agrupados junto
 das outras pás da mesma turbina. Base agora com 210 pás em 70 turbinas,
 todas com as 3 pás completas.
+
+## UI: Submissão Automática movida pro centro + zero texto explicativo
+
+Pedido do usuário: "no caso de ui era interessante subir esse botão pra
+uma região mais central, hoje fica no final do modo de uma turbina, até
+porque já está bem robusto e não precisa ser algo escondido" — o
+checkbox "Submeter formulário automaticamente" estava dentro da caixa
+"Opções de execução", por sua vez dentro do `<details>` colapsado
+"Turbina manual (avançado)" — ou seja, pra ligar Submissão Automática
+(que também controla o fluxo principal "Automação Completa", não só o
+manual) era preciso abrir a seção avançada primeiro.
+
+**Fix**: `autoSubmit` virou um checkbox isolado, sempre visível, entre
+o card "Automação Completa" e a seção colapsada — com borda destacada
+quando ligado. Removida a cópia duplicada de dentro de "Opções de
+execução" (mesmo estado, um controle só).
+
+Pedido relacionado, mais amplo: "podemos nunca mais colocar qualquer
+texto explicativo em qualquer módulo que seja" — removidos os 3 blocos
+de texto explicativo que ainda restavam no módulo (descrição da
+"Automação Completa", legenda da pasta de fotos, legenda da faixa de
+linhas). Regra gravada em memória pra valer daqui pra frente em
+qualquer módulo, não só nesse.
