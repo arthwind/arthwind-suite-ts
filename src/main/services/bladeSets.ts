@@ -47,6 +47,20 @@ function seedFromResourcesIfMissing(dest: string): void {
   }
 }
 
+/** O Set Number de uma pá é SEMPRE os 4 últimos dígitos do Serial Number
+ * completo ("A1/T3 811 XXXX YYYY" → Set = "YYYY", literal, sem tirar nem
+ * acrescentar zero à esquerda — Set 1000 é "1000", Set 999 é "0999")
+ * (regra confirmada pelo usuário). A coluna "Set Number" da planilha que
+ * alimenta essa lista vem preenchida manualmente à parte e, na prática,
+ * bate errado ou fica em branco com frequência (achado real: 107 das 208
+ * entradas estavam erradas ou vazias) — então em vez de confiar nela,
+ * deriva sempre do próprio serial, que é a fonte de verdade. */
+function deriveSetNumberFromSerial(serial: string): string | null {
+  const parts = serial.trim().split(/\s+/)
+  const last = parts[parts.length - 1]
+  return /^\d{4}$/.test(last) ? last : null
+}
+
 function loadBladeSets(): BladeSetEntry[] {
   const filePath = bladeSetsPath()
   seedFromResourcesIfMissing(filePath)
@@ -55,7 +69,11 @@ function loadBladeSets(): BladeSetEntry[] {
     const stat = fs.statSync(filePath)
     if (cache && stat.mtimeMs === cacheMtimeMs) return cache
     const raw = fs.readFileSync(filePath, 'utf-8')
-    cache = JSON.parse(raw)
+    const parsed: BladeSetEntry[] = JSON.parse(raw)
+    cache = parsed.map((e) => ({
+      ...e,
+      setNumber: (e.serial && deriveSetNumberFromSerial(e.serial)) || e.setNumber
+    }))
     cacheMtimeMs = stat.mtimeMs
     return cache ?? []
   } catch {

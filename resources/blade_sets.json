@@ -195,7 +195,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0203 0116",
     "bladeSn": "203",
-    "setNumber": "116"
+    "setNumber": "0116"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -537,7 +537,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0551 0713",
     "bladeSn": "551",
-    "setNumber": "0173"
+    "setNumber": "0713"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -780,7 +780,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0582 0185",
     "bladeSn": "582",
-    "setNumber": "185"
+    "setNumber": "0185"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -789,7 +789,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0586 0185",
     "bladeSn": "586",
-    "setNumber": "185"
+    "setNumber": "0185"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -798,7 +798,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0493 0185",
     "bladeSn": "493",
-    "setNumber": "185"
+    "setNumber": "0185"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -807,7 +807,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0569 0180",
     "bladeSn": "569",
-    "setNumber": "180"
+    "setNumber": "0180"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -816,7 +816,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0571 0180",
     "bladeSn": "571",
-    "setNumber": "180"
+    "setNumber": "0180"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -825,7 +825,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0572 0180",
     "bladeSn": "572",
-    "setNumber": "180"
+    "setNumber": "0180"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -834,7 +834,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0616 0195",
     "bladeSn": "616",
-    "setNumber": "195"
+    "setNumber": "0195"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -843,7 +843,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0617 0195",
     "bladeSn": "617",
-    "setNumber": "195"
+    "setNumber": "0195"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -852,7 +852,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0618 0195",
     "bladeSn": "618",
-    "setNumber": "195"
+    "setNumber": "0195"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -906,7 +906,7 @@
     "component": "Rotor blade 2",
     "serial": "T3 811 0477 0159",
     "bladeSn": "477",
-    "setNumber": "159"
+    "setNumber": "0159"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -942,7 +942,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0644 0167",
     "bladeSn": "644",
-    "setNumber": "167"
+    "setNumber": "0167"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -960,7 +960,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0253 0167",
     "bladeSn": "253",
-    "setNumber": "167"
+    "setNumber": "0167"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1023,7 +1023,7 @@
     "component": "Rotor blade 1",
     "serial": "T3 811 0528 0176",
     "bladeSn": "528",
-    "setNumber": "176"
+    "setNumber": "0176"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1050,7 +1050,7 @@
     "component": "Rotor blade 1",
     "serial": "T3 811 0526 0175",
     "bladeSn": "526",
-    "setNumber": "175"
+    "setNumber": "0175"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1059,7 +1059,7 @@
     "component": "Rotor blade 2",
     "serial": "T3 811 0524 0175",
     "bladeSn": "524",
-    "setNumber": "175"
+    "setNumber": "0175"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1068,7 +1068,7 @@
     "component": "Rotor blade 3",
     "serial": "T3 811 0527 0175",
     "bladeSn": "527",
-    "setNumber": "175"
+    "setNumber": "0175"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1077,7 +1077,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0608 0199",
     "bladeSn": "608",
-    "setNumber": null
+    "setNumber": "0199"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1086,7 +1086,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0588 0199",
     "bladeSn": "588",
-    "setNumber": null
+    "setNumber": "0199"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1095,7 +1095,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0635 0200",
     "bladeSn": "635",
-    "setNumber": null
+    "setNumber": "0200"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1104,7 +1104,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0628 0200",
     "bladeSn": "628",
-    "setNumber": null
+    "setNumber": "0200"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1113,7 +1113,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0636 0200",
     "bladeSn": "636",
-    "setNumber": null
+    "setNumber": "0200"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1122,7 +1122,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0581 0183",
     "bladeSn": "581",
-    "setNumber": null
+    "setNumber": "0183"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1131,7 +1131,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0174 0183",
     "bladeSn": "174",
-    "setNumber": null
+    "setNumber": "0183"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1140,7 +1140,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0578 0183",
     "bladeSn": "578",
-    "setNumber": null
+    "setNumber": "0183"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1149,7 +1149,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0587 0186",
     "bladeSn": "587",
-    "setNumber": null
+    "setNumber": "0186"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1158,7 +1158,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0589 0186",
     "bladeSn": "589",
-    "setNumber": null
+    "setNumber": "0186"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1167,7 +1167,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0590 0186",
     "bladeSn": "590",
-    "setNumber": null
+    "setNumber": "0186"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1176,7 +1176,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0640 0202",
     "bladeSn": "640",
-    "setNumber": null
+    "setNumber": "0202"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1185,7 +1185,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0630 0202",
     "bladeSn": "630",
-    "setNumber": null
+    "setNumber": "0202"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1194,7 +1194,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0638 0202",
     "bladeSn": "638",
-    "setNumber": null
+    "setNumber": "0202"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1203,7 +1203,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0647 0204",
     "bladeSn": "647",
-    "setNumber": null
+    "setNumber": "0204"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1212,7 +1212,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0626 0204",
     "bladeSn": "626",
-    "setNumber": null
+    "setNumber": "0204"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1221,7 +1221,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0622 0204",
     "bladeSn": "622",
-    "setNumber": null
+    "setNumber": "0204"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1230,7 +1230,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0594 0187",
     "bladeSn": "594",
-    "setNumber": null
+    "setNumber": "0187"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1239,7 +1239,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0591 0187",
     "bladeSn": "591",
-    "setNumber": null
+    "setNumber": "0187"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1248,7 +1248,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0596 0188",
     "bladeSn": "596",
-    "setNumber": null
+    "setNumber": "0188"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1257,7 +1257,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0595 0188",
     "bladeSn": "595",
-    "setNumber": null
+    "setNumber": "0188"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1266,7 +1266,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0597 0188",
     "bladeSn": "597",
-    "setNumber": null
+    "setNumber": "0188"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1275,7 +1275,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0593 0187",
     "bladeSn": "593",
-    "setNumber": null
+    "setNumber": "0187"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1284,7 +1284,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0663 0209",
     "bladeSn": "663",
-    "setNumber": null
+    "setNumber": "0209"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1293,7 +1293,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0639 0209",
     "bladeSn": "639",
-    "setNumber": null
+    "setNumber": "0209"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1302,7 +1302,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0660 0209",
     "bladeSn": "660",
-    "setNumber": null
+    "setNumber": "0209"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1311,7 +1311,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0599 0189",
     "bladeSn": "599",
-    "setNumber": null
+    "setNumber": "0189"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1320,7 +1320,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0598 0189",
     "bladeSn": "598",
-    "setNumber": null
+    "setNumber": "0189"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1329,7 +1329,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0592 0189",
     "bladeSn": "592",
-    "setNumber": null
+    "setNumber": "0189"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1338,7 +1338,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0320 0190",
     "bladeSn": "320",
-    "setNumber": null
+    "setNumber": "0190"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1347,7 +1347,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0600 0190",
     "bladeSn": "600",
-    "setNumber": null
+    "setNumber": "0190"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1356,7 +1356,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0601 0190",
     "bladeSn": "601",
-    "setNumber": null
+    "setNumber": "0190"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1365,7 +1365,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0666 0211",
     "bladeSn": "666",
-    "setNumber": null
+    "setNumber": "0211"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1374,7 +1374,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0668 0211",
     "bladeSn": "668",
-    "setNumber": null
+    "setNumber": "0211"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1383,7 +1383,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0671 0211",
     "bladeSn": "671",
-    "setNumber": null
+    "setNumber": "0211"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1392,7 +1392,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0672 0213",
     "bladeSn": "672",
-    "setNumber": null
+    "setNumber": "0213"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1401,7 +1401,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0673 0213",
     "bladeSn": "673",
-    "setNumber": null
+    "setNumber": "0213"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1410,7 +1410,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0670 0213",
     "bladeSn": "670",
-    "setNumber": null
+    "setNumber": "0213"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1419,7 +1419,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0684 0216",
     "bladeSn": "684",
-    "setNumber": null
+    "setNumber": "0216"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1428,7 +1428,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0650 0216",
     "bladeSn": "650",
-    "setNumber": null
+    "setNumber": "0216"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1437,7 +1437,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0679 0216",
     "bladeSn": "679",
-    "setNumber": null
+    "setNumber": "0216"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1446,7 +1446,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0686 0217",
     "bladeSn": "686",
-    "setNumber": null
+    "setNumber": "0217"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1455,7 +1455,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0685 0217",
     "bladeSn": "685",
-    "setNumber": null
+    "setNumber": "0217"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1464,7 +1464,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0283 0127",
     "bladeSn": "283",
-    "setNumber": null
+    "setNumber": "0127"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1473,7 +1473,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0282 0127",
     "bladeSn": "282",
-    "setNumber": null
+    "setNumber": "0127"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1482,7 +1482,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0676 0214",
     "bladeSn": "676",
-    "setNumber": null
+    "setNumber": "0214"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1491,7 +1491,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0675 0214",
     "bladeSn": "675",
-    "setNumber": null
+    "setNumber": "0214"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1500,7 +1500,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0678 0214",
     "bladeSn": "678",
-    "setNumber": null
+    "setNumber": "0214"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1509,7 +1509,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0687 0217",
     "bladeSn": "687",
-    "setNumber": null
+    "setNumber": "0217"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1518,7 +1518,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0310 0127",
     "bladeSn": "310",
-    "setNumber": null
+    "setNumber": "0127"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1527,7 +1527,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0691 0219",
     "bladeSn": "691",
-    "setNumber": null
+    "setNumber": "0219"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1536,7 +1536,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0695 0219",
     "bladeSn": "695",
-    "setNumber": null
+    "setNumber": "0219"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1545,7 +1545,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0692 0219",
     "bladeSn": "692",
-    "setNumber": null
+    "setNumber": "0219"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1554,7 +1554,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0690 0218",
     "bladeSn": "690",
-    "setNumber": null
+    "setNumber": "0218"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1563,7 +1563,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0688 0218",
     "bladeSn": "688",
-    "setNumber": null
+    "setNumber": "0218"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1572,7 +1572,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0689 0218",
     "bladeSn": "689",
-    "setNumber": null
+    "setNumber": "0218"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1581,7 +1581,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0613 0194",
     "bladeSn": "613",
-    "setNumber": null
+    "setNumber": "0194"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1590,7 +1590,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0621 0194",
     "bladeSn": "621",
-    "setNumber": null
+    "setNumber": "0194"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1599,7 +1599,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0620 0194",
     "bladeSn": "620",
-    "setNumber": null
+    "setNumber": "0194"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1608,7 +1608,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0607 0192",
     "bladeSn": "607",
-    "setNumber": null
+    "setNumber": "0192"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1617,7 +1617,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0328 0192",
     "bladeSn": "328",
-    "setNumber": null
+    "setNumber": "0192"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1626,7 +1626,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0610 0192",
     "bladeSn": "610",
-    "setNumber": null
+    "setNumber": "0192"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1635,7 +1635,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0604 0193",
     "bladeSn": "604",
-    "setNumber": null
+    "setNumber": "0193"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1644,7 +1644,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0614 0193",
     "bladeSn": "614",
-    "setNumber": null
+    "setNumber": "0193"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1653,7 +1653,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0612 0193",
     "bladeSn": "612",
-    "setNumber": null
+    "setNumber": "0193"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1662,7 +1662,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0576 0181",
     "bladeSn": "576",
-    "setNumber": null
+    "setNumber": "0181"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1671,7 +1671,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0573 0181",
     "bladeSn": "573",
-    "setNumber": null
+    "setNumber": "0181"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1680,7 +1680,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0304 0181",
     "bladeSn": "304",
-    "setNumber": null
+    "setNumber": "0181"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1689,7 +1689,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0606 0191",
     "bladeSn": "606",
-    "setNumber": null
+    "setNumber": "0191"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1698,7 +1698,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0602 0191",
     "bladeSn": "602",
-    "setNumber": null
+    "setNumber": "0191"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1707,7 +1707,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0605 0191",
     "bladeSn": "605",
-    "setNumber": null
+    "setNumber": "0191"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1716,7 +1716,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0603 0197",
     "bladeSn": "603",
-    "setNumber": null
+    "setNumber": "0197"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1725,7 +1725,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0536 0197",
     "bladeSn": "536",
-    "setNumber": null
+    "setNumber": "0197"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1734,7 +1734,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0619 0197",
     "bladeSn": "619",
-    "setNumber": null
+    "setNumber": "0197"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1743,7 +1743,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0693 0220",
     "bladeSn": "693",
-    "setNumber": null
+    "setNumber": "0220"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1752,7 +1752,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0615 0220",
     "bladeSn": "615",
-    "setNumber": null
+    "setNumber": "0220"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1761,7 +1761,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0271 0220",
     "bladeSn": "271",
-    "setNumber": null
+    "setNumber": "0220"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1770,7 +1770,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0658 0208",
     "bladeSn": "658",
-    "setNumber": null
+    "setNumber": "0208"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1779,7 +1779,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0764 0208",
     "bladeSn": "764",
-    "setNumber": null
+    "setNumber": "0208"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1788,7 +1788,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0657 0208",
     "bladeSn": "657",
-    "setNumber": null
+    "setNumber": "0208"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1797,7 +1797,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0664 0210",
     "bladeSn": "664",
-    "setNumber": null
+    "setNumber": "0210"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1806,7 +1806,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0667 0210",
     "bladeSn": "667",
-    "setNumber": null
+    "setNumber": "0210"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1815,7 +1815,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0661 0210",
     "bladeSn": "661",
-    "setNumber": null
+    "setNumber": "0210"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1824,7 +1824,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0641 0201",
     "bladeSn": "641",
-    "setNumber": null
+    "setNumber": "0201"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1833,7 +1833,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0634 0201",
     "bladeSn": "634",
-    "setNumber": null
+    "setNumber": "0201"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1842,7 +1842,7 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0637 0201",
     "bladeSn": "637",
-    "setNumber": null
+    "setNumber": "0201"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1851,7 +1851,7 @@
     "component": "Rotor blade 1",
     "serial": "A1 811 0629 0198",
     "bladeSn": "629",
-    "setNumber": null
+    "setNumber": "0198"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1860,7 +1860,7 @@
     "component": "Rotor blade 2",
     "serial": "A1 811 0633 0198",
     "bladeSn": "633",
-    "setNumber": null
+    "setNumber": "0198"
   },
   {
     "windfarm": "Lagoa dos Ventos V",
@@ -1869,6 +1869,6 @@
     "component": "Rotor blade 3",
     "serial": "A1 811 0627 0198",
     "bladeSn": "627",
-    "setNumber": null
+    "setNumber": "0198"
   }
 ]

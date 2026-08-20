@@ -1899,3 +1899,41 @@ Fila / Rodar Agora) só apareciam depois de rolar por tudo isso.
 Verificado abrindo o instalador de verdade (não só o dev server) e
 navegando visualmente pelo painel colapsado/expandido antes de
 considerar concluído.
+
+## Fix: Set Number derivado sempre do Serial, nunca mais da coluna separada
+
+Usuário apontou (regra de negócio confirmada): o Set Number de uma pá é
+SEMPRE os 4 últimos dígitos do Serial Number completo — formato
+"A1/T3 811 XXXX YYYY", onde YYYY é o Set, literal, sem tirar nem
+acrescentar zero à esquerda (Set 1000 é "1000", Set 999 é "0999").
+`blade_sets.json` guarda o Set numa coluna SEPARADA (preenchida à mão
+na planilha de origem), que na prática não é confiável.
+
+**Achado ao investigar** `resources/blade_sets.json` (208 entradas):
+- 89 entradas com Set em branco (`null`) na planilha de origem.
+- 107 de 208 entradas (incluindo as 89 em branco) tinham o Set
+  ARMAZENADO diferente do Set derivado do próprio serial — a maioria
+  só faltando o zero à esquerda ("175" em vez de "0175"), mas achado
+  um caso de transcrição errada de verdade: VSR07-06-90636 tinha Set
+  "0173" guardado enquanto o serial ("A1 811 0551 0713") diz "0713".
+- Esse bug afetava DOIS lugares: `SnowMappings.getDamageDescription`/a
+  geração das linhas "Video" do xlsx do Módulo 23 (`snowProcessor.ts`,
+  usa `getBladeInfo`/`getSetNumber`), E o campo "Blade Set Number" do
+  próprio formulário Inspection Report (Fase 0, via
+  `getBladesForTurbine` em `snowAutomation.ts:898`) — ou seja, o Set
+  errado podia ir parar tanto na planilha quanto direto no ServiceNow.
+
+**Fix** — dois níveis:
+1. `resources/blade_sets.json` regenerado: Set de toda entrada
+   recalculado a partir do próprio `serial` (script de correção
+   pontual, não fica no app).
+2. `bladeSets.ts`: `loadBladeSets()` agora SEMPRE deriva o Set a partir
+   do `serial` de cada entrada ao carregar (nova
+   `deriveSetNumberFromSerial`), sobrescrevendo o que estiver salvo na
+   coluna separada — só cai pro valor antigo se o serial não bater no
+   formato esperado (rede de segurança, não deveria acontecer já que
+   os 208 batem 100%). Isso corrige o problema não só no
+   `resources/blade_sets.json` já regenerado, mas também pra qualquer
+   máquina de usuário que já tenha uma cópia antiga (e com o mesmo bug)
+   seedada em `%APPDATA%/ArthwindSuite/blade_sets.json` — a derivação
+   roda em cima de QUALQUER cópia, não depende de re-seedar o arquivo.
