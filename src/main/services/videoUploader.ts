@@ -92,7 +92,7 @@ export async function enviarVideosDrive(
       // Buscar a pasta correspondente da pá no Google Drive (ex: BLADE_0487 no PC -> BLADE 0487 ou BLADE_0487 no Drive)
       const driveEntries = fs.readdirSync(driveTurbineFolder, { withFileTypes: true })
       let matchedDriveBladeName = ''
-      
+
       for (const entry of driveEntries) {
         if (entry.isDirectory()) {
           if (normalize(entry.name) === normLocalBladeName) {
@@ -102,9 +102,20 @@ export async function enviarVideosDrive(
         }
       }
 
+      // Bug real achado pelo usuário: com só 1 pá pronta (as outras ainda em
+      // processamento), a pasta da pá NÃO existe ainda no Drive — ela só é criada
+      // (por outro processo/manualmente) turbina por turbina, não necessariamente
+      // com as 3 pás de uma vez. O código antigo PULAVA a pá inteira nesse caso
+      // ("Pulando..."), então com só 1 pá pronta, nada era copiado (a única pá
+      // pronta batia exatamente nesse caso). Agora cria a pasta da pá no Drive
+      // (com o nome local, ex: "BLADE_0515") em vez de desistir — a pá pronta é
+      // copiada mesmo que seja a única, sem esperar as outras.
       if (!matchedDriveBladeName) {
-        sendLog(`⚠ Não foi possível encontrar a pasta correspondente no Drive para a pá local '${localBladeName}' (buscado por: '${normLocalBladeName}'). Pulando...`, 'warning')
-        continue
+        matchedDriveBladeName = localBladeName
+        sendLog(`⚠ Pasta da pá '${localBladeName}' não existe ainda no Drive — será criada.`, 'warning')
+        if (!dryRun) {
+          fs.mkdirSync(path.join(driveTurbineFolder, matchedDriveBladeName), { recursive: true })
+        }
       }
 
       const driveBladePath = path.join(driveTurbineFolder, matchedDriveBladeName)
@@ -125,7 +136,12 @@ export async function enviarVideosDrive(
           }
 
           // Buscar pasta de horário correspondente no Drive da pá (ex: 360-03HRS ou 360-09HRS)
-          const driveBladeEntries = fs.readdirSync(driveBladePath, { withFileTypes: true })
+          // — em dry-run, a pasta da pá pode não existir de verdade ainda (não é
+          // criada pra não alterar nada no disco), então trata como "sem entradas"
+          // em vez de deixar o readdirSync estourar.
+          const driveBladeEntries = fs.existsSync(driveBladePath)
+            ? fs.readdirSync(driveBladePath, { withFileTypes: true })
+            : []
           let matchedTimeFolderName = ''
 
           for (const entry of driveBladeEntries) {
