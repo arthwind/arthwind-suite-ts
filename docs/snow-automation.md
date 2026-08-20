@@ -2153,3 +2153,29 @@ inglês e português). `ensureAuthenticatedPage` já tinha o loop de
 espera certo (até 5 minutos, dando tempo de alguém aprovar/digitar o
 código) — só precisava saber reconhecer que ainda estava numa etapa de
 login, não fechar a aba cedo demais.
+
+## Ainda investigando: upload do Daily Activity Report continua falhando (v1.19.0)
+
+O fix da v1.17.1 (clicar "Choose a file" dentro do modal) NÃO resolveu
+— usuário confirmou rodando exatamente v1.19.0 e o log mostra a mesma
+falha (`⚠ Não abriu o seletor de arquivo pra anexar Daily Activity
+Report.`). Mais que isso: usuário esclareceu que o clique **não faz
+NADA visível** — nem o modal "Add attachments" chega a abrir. Isso
+descarta a hipótese de "modal de 2 cliques" — o problema é mais básico:
+o seletor (`'.attachment-button, [title*="attachment" i]'` OR texto
+"Add attachments" OR link/botão com esse texto) provavelmente está
+CLICANDO NO ELEMENTO ERRADO — algo que "parece visível" pro Playwright
+mas não é o ícone de anexo de verdade (ex.: a palavra "Add attachments"
+só aparece como TOOLTIP ao passar o mouse sobre o clipe 📎, não como
+texto estático na página — pode nunca ter batido com nenhuma das 3
+alternativas do seletor, e o que `isVisible()` achou pode ser outro
+elemento qualquer da página com "attachment" em algum atributo, sem
+relação nenhuma com o registro atual).
+
+**Decisão**: em vez de tentar mais um seletor no escuro, adicionado
+diagnóstico automático (`dumpAttachmentDebugInfo`) que roda toda vez
+que o upload falha — salva um screenshot da tela inteira em
+`%TEMP%/arthwind-attachment-debug/` E lista todo elemento da página com
+"attach" no `title`/`aria-label`/`class` (até 10, com tag, visibilidade
+e os 3 atributos). Da próxima falha, isso deve mostrar o elemento real
+que precisa ser usado, em vez de mais uma tentativa às cegas.

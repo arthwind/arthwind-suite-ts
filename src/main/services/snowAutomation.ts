@@ -1091,6 +1091,7 @@ class InspectionReportFiller extends ServiceNowFormFiller {
 
     if (!(await attachmentBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
       this.log(`  ⚠ Botão "Add attachments" não encontrado — não deu pra subir ${label}.`)
+      await this.dumpAttachmentDebugInfo(label)
       return false
     }
 
@@ -1119,6 +1120,12 @@ class InspectionReportFiller extends ServiceNowFormFiller {
 
     if (!fileChooser) {
       this.log(`  ⚠ Não abriu o seletor de arquivo pra anexar ${label}.`)
+      // Diagnóstico: usuário reportou que o clique não faz NADA visível (nem o
+      // modal abre) — sinal de que o seletor está clicando no elemento errado.
+      // Em vez de tentar adivinhar de novo às cegas, tira um screenshot + lista
+      // todo elemento com "attach" no title/aria-label/class pra achar o elemento
+      // certo com dado real na próxima falha, não mais chute.
+      await this.dumpAttachmentDebugInfo(label)
       return false
     }
 
@@ -1134,6 +1141,40 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     }
 
     return true
+  }
+
+  /** Diagnóstico pra falha de upload de anexo (usuário reportou: o clique não faz
+   * NADA visível, nem o modal abre — sinal de que o seletor está clicando no
+   * elemento errado, ou num elemento sem handler nenhum). Salva um screenshot da
+   * tela no momento da falha + lista todo elemento com "attach" no
+   * title/aria-label/class, pra achar o elemento certo com dado real na próxima
+   * falha em vez de tentar outro seletor no escuro de novo. Nunca lança erro —
+   * é só um extra de diagnóstico, não pode derrubar o resto da automação. */
+  private async dumpAttachmentDebugInfo(label: string): Promise<void> {
+    try {
+      const dir = path.join(os.tmpdir(), 'arthwind-attachment-debug')
+      fs.mkdirSync(dir, { recursive: true })
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const screenshotPath = path.join(dir, `${stamp}_${label.replace(/\s+/g, '_')}.png`)
+      await this.page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
+      this.log(`  🔍 [debug] Screenshot salvo: ${screenshotPath}`)
+
+      const scope = this.getScope()
+      const candidates = scope.locator('[title*="attach" i], [aria-label*="attach" i], [class*="attach" i]')
+      const count = await candidates.count().catch(() => 0)
+      this.log(`  🔍 [debug] ${count} elemento(s) com "attach" no title/aria-label/class:`)
+      for (let i = 0; i < Math.min(count, 10); i++) {
+        const el = candidates.nth(i)
+        const tag = await el.evaluate((n) => n.tagName).catch(() => '?')
+        const title = await el.getAttribute('title').catch(() => null)
+        const ariaLabel = await el.getAttribute('aria-label').catch(() => null)
+        const cls = await el.getAttribute('class').catch(() => null)
+        const visible = await el.isVisible().catch(() => false)
+        this.log(`    - <${tag}> visible=${visible} title="${title || ''}" aria-label="${ariaLabel || ''}" class="${cls || ''}"`)
+      }
+    } catch (err: any) {
+      this.log(`  ⚠ [debug] Falha ao gerar diagnóstico: ${err.message || err}`)
+    }
   }
 
   /** Segunda auditoria pedida pelo usuário: confere se os dados que a automação
