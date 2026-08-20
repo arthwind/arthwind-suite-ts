@@ -1083,16 +1083,38 @@ class InspectionReportFiller extends ServiceNowFormFiller {
    * dentro dele. */
   async uploadAttachment(filePath: string, label: string): Promise<boolean> {
     const scope = this.getScope()
-    const attachmentBtn = scope
-      .locator('.attachment-button, [title*="attachment" i]')
-      .or(scope.getByText(/add attachments?/i))
-      .or(scope.locator('a, button', { hasText: /add attachments?/i }))
-      .first()
+
+    // Achado real em teste (dumpAttachmentDebugInfo): a tela tem VÁRIOS elementos
+    // com "attachment" no title/class — inclusive um <div class="...
+    // attachment-button..." title="Add an attachment"> (singular, só o ícone do
+    // cabeçalho) que NÃO abre nada de útil ao clicar. O botão de verdade é
+    // <button class="...sp-attachment-add..." aria-label="Add attachments">
+    // (plural, mesmo texto da instrução da tela). `.or()` não garante prioridade
+    // — `.first()` pega o primeiro em ordem de DOM entre TODOS os candidatos
+    // unidos, não o primeiro da lista de alternativas — por isso o `<div>` errado
+    // ganhava. Agora tenta o botão específico e confirmado PRIMEIRO, sozinho, e
+    // só cai no seletor largo (mais chance de pegar o elemento errado) se esse
+    // específico não existir.
+    const specificBtn = scope.locator('button.sp-attachment-add, button[aria-label="Add attachments" i]').first()
+    let attachmentBtn = specificBtn
+    let usedFallback = false
+
+    if (!(await specificBtn.isVisible({ timeout: 2000 }).catch(() => false))) {
+      usedFallback = true
+      attachmentBtn = scope
+        .locator('.attachment-button, [title*="attachment" i]')
+        .or(scope.getByText(/add attachments?/i))
+        .or(scope.locator('a, button', { hasText: /add attachments?/i }))
+        .first()
+    }
 
     if (!(await attachmentBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
       this.log(`  ⚠ Botão "Add attachments" não encontrado — não deu pra subir ${label}.`)
       await this.dumpAttachmentDebugInfo(label)
       return false
+    }
+    if (usedFallback) {
+      this.log(`  ⚠ Botão específico de anexo não encontrado — usando seletor largo (pode clicar no elemento errado).`)
     }
 
     const pagesBefore = this.page.context().pages().length

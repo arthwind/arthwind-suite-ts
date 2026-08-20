@@ -2179,3 +2179,27 @@ que o upload falha — salva um screenshot da tela inteira em
 "attach" no `title`/`aria-label`/`class` (até 10, com tag, visibilidade
 e os 3 atributos). Da próxima falha, isso deve mostrar o elemento real
 que precisa ser usado, em vez de mais uma tentativa às cegas.
+
+## Fix de verdade: seletor de "Add attachments" pegava o elemento errado
+
+O diagnóstico funcionou de primeira. Log real mostrou 8 elementos com
+"attach" na tela — dois deles batiam com o seletor antigo:
+- `<div class="pull-right attachment-button ng-scope" title="Add an
+  attachment">` (singular) — só o ícone do cabeçalho, clicar nele não
+  abre nada de útil.
+- `<button class="panel-button sp-attachment-add btn btn-link"
+  title="Add attachments" aria-label="Add attachments">` (plural,
+  mesmo texto da instrução obrigatória da tela) — o botão de verdade,
+  dentro do painel de anexos que já vem expandido na tela (não é um
+  modal separado).
+
+O seletor antigo unia os dois com `.or()` e usava `.first()` — que
+pega o primeiro em ORDEM DE DOM entre todos os candidatos combinados,
+não o primeiro item da lista de alternativas escrita no código. Como o
+`<div>` do cabeçalho vem antes no DOM, ele sempre ganhava — batendo
+exatamente com o relatado: "não faz nada, nem o modal abre".
+
+**Fix**: `uploadAttachment` agora tenta o botão específico e confirmado
+(`button.sp-attachment-add` ou `button[aria-label="Add attachments"
+i]`) PRIMEIRO, sozinho — só cai no seletor largo antigo (que pode
+pegar o elemento errado) se esse específico não existir na tela.
