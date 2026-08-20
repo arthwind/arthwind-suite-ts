@@ -1,6 +1,6 @@
 {
   "name": "arthwind-suite-ts",
-  "version": "1.19.2",
+  "version": "1.20.0",
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
   "author": "example.com",

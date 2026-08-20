@@ -13,6 +13,7 @@
  */
 import { chromium, BrowserContext, Page } from 'playwright'
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -915,10 +916,30 @@ function findDailyReportTemplate(): string | null {
   return candidates.find((p) => fs.existsSync(p)) ?? null
 }
 
-function parseDateBR(s: string): Date | null {
-  const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (!m) return null
-  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]))
+/** Acha o caminho (dentro do .xlsx, que é um zip) do XML da aba "Activities" —
+ * dinamicamente, via workbook.xml + workbook.xml.rels, em vez de assumir
+ * "sheet1.xml" — o número muda se alguém reordenar as abas ao gerar um molde
+ * novo a partir do ServiceNow. */
+async function findActivitiesSheetPath(zip: JSZip): Promise<string> {
+  const wbXmlFile = zip.file('xl/workbook.xml')
+  if (!wbXmlFile) throw new Error('xl/workbook.xml não encontrado no molde — arquivo não é um .xlsx válido.')
+  const wbXml = await wbXmlFile.async('string')
+  const sheetMatch = wbXml.match(/<sheet[^>]*name="Activities"[^>]*\/>/)
+  if (!sheetMatch) throw new Error('Aba "Activities" não encontrada no molde.')
+  const ridMatch = sheetMatch[0].match(/r:id="([^"]+)"/)
+  if (!ridMatch) throw new Error('Aba "Activities" sem r:id no molde.')
+
+  const relsFile = zip.file('xl/_rels/workbook.xml.rels')
+  if (!relsFile) throw new Error('xl/_rels/workbook.xml.rels não encontrado no molde.')
+  const relsXml = await relsFile.async('string')
+  const relMatch = relsXml.match(new RegExp(`<Relationship[^>]*Id="${ridMatch[1]}"[^>]*Target="([^"]+)"`))
+  if (!relMatch) throw new Error('Relação da aba "Activities" não encontrada em workbook.xml.rels.')
+
+  return 'xl/' + relMatch[1].replace(/^\.?\/?/, '')
+}
+
+function escapeXmlText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 /** Gera o Daily Activity Report preenchido a partir do molde empacotado — 3 linhas
@@ -928,7 +949,18 @@ function parseDateBR(s: string): Date | null {
  * (idem). Técnico alterna entre os 2 nomes da campanha por turbina — não é
  * informação relevante pro cliente, só precisa estar preenchido (pedido do
  * usuário). Retorna `null` se o molde não foi encontrado (não trava o resto do
- * fluxo — só loga o aviso e segue sem o anexo). */
+ * fluxo — só loga o aviso e segue sem o anexo).
+ *
+ * NÃO usa ExcelJS — achado real em teste: o ExcelJS TRAVA PRA SEMPRE (nunca
+ * resolve nem rejeita) tentando ler o molde de verdade do ServiceNow, mesmo o
+ * arquivo em branco sem nenhuma edição (confirmado isolado, fora do app). E o
+ * usuário confirmou que uma versão reconstruída do zero (sem essa trava, mas
+ * também sem a estrutura exata do molde oficial) dá erro na hora de finalizar
+ * o Inspection Report no ServiceNow — o arquivo TEM que ser bit-a-bit o molde
+ * deles, só com os dados inseridos. Por isso a geração agora edita o XML bruto
+ * dentro do .zip (.xlsx é um zip) via JSZip — o resto do arquivo (fórmulas,
+ * estilos, abas ReadMe/dropdowns/Variables, tabelas) fica 100% intacto, só os
+ * `<c>` (célula) das 3 linhas de dados são inseridos/alterados. */
 async function generateDailyActivityReport(
   data: InspectionReportData,
   inspectionDate: string,
@@ -942,47 +974,63 @@ async function generateDailyActivityReport(
     return null
   }
 
-  const dateVal = parseDateBR(inspectionDate)
-  if (!dateVal) {
-    log(`  ⚠ Data de inspeção "${inspectionDate}" não bateu com o formato DD/MM/YYYY — pulando Daily Activity Report.`)
-    return null
-  }
-
-  const wb = new ExcelJS.Workbook()
-  await wb.xlsx.readFile(templatePath)
-  const ws = wb.getWorksheet('Activities')
-  if (!ws) {
-    log(`  ⚠ Molde do Daily Activity Report sem aba "Activities" — pulando anexo.`)
-    return null
-  }
-
   const blades = [data.bladeA.serial, data.bladeB.serial, data.bladeC.serial]
   const technician = DAILY_REPORT_TECHNICIANS[technicianIndex % DAILY_REPORT_TECHNICIANS.length]
   const rowNums = [5, 6, 7]
-  let filledAny = false
 
-  for (let i = 0; i < 3; i++) {
-    const serial = blades[i]
-    if (!serial) continue
-    const row = rowNums[i]
-    ws.getCell(`A${row}`).value = dateVal
-    ws.getCell(`B${row}`).value = serial
-    ws.getCell(`D${row}`).value = DAILY_REPORT_LEADER
-    ws.getCell(`E${row}`).value = technician
-    ws.getCell(`J${row}`).value = 'Inspection Internal'
-    ws.getCell(`K${row}`).value = `Blade ${i + 1} Completed`
-    ws.getCell(`L${row}`).value = 1.5
-    filledAny = true
-  }
+  try {
+    const templateBuf = fs.readFileSync(templatePath)
+    const zip = await JSZip.loadAsync(templateBuf)
+    const sheetPath = await findActivitiesSheetPath(zip)
+    const sheetFile = zip.file(sheetPath)
+    if (!sheetFile) throw new Error(`Arquivo "${sheetPath}" não encontrado dentro do molde.`)
+    let xml = await sheetFile.async('string')
 
-  if (!filledAny) {
-    log(`  ⚠ Nenhuma pá com serial conhecido pro Daily Activity Report — pulando anexo.`)
+    let filledAny = false
+    for (let i = 0; i < 3; i++) {
+      const serial = blades[i]
+      if (!serial) continue
+      const row = rowNums[i]
+
+      // Âncora conhecida do molde oficial: nas linhas 5-7, a célula L (Working
+      // Time) já existe vazia ("<c r="L5" s="2"/>") — colunas A-K não existem
+      // ainda (linha em branco de verdade). Insere as novas células ANTES dela
+      // (ordem de coluna certa: A,B,D,E,J,K,L) e dá valor pra própria L.
+      const anchor = `<c r="L${row}" s="2"/>`
+      if (!xml.includes(anchor)) {
+        throw new Error(`Âncora da linha ${row} não encontrada no molde — a estrutura pode ter mudado (avise antes de usar um molde novo).`)
+      }
+
+      const cellStr = (ref: string, text: string) => `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`
+      const newCells =
+        cellStr(`A${row}`, inspectionDate) +
+        cellStr(`B${row}`, serial) +
+        cellStr(`D${row}`, DAILY_REPORT_LEADER) +
+        cellStr(`E${row}`, technician) +
+        cellStr(`J${row}`, 'Inspection Internal') +
+        cellStr(`K${row}`, `Blade ${i + 1} Completed`)
+      const replacement = `${newCells}<c r="L${row}" s="2"><v>1.5</v></c>`
+
+      xml = xml.replace(anchor, replacement)
+      filledAny = true
+    }
+
+    if (!filledAny) {
+      log(`  ⚠ Nenhuma pá com serial conhecido pro Daily Activity Report — pulando anexo.`)
+      return null
+    }
+
+    zip.file(sheetPath, xml)
+    // compression: 'DEFLATE' — sem isso o JSZip usa STORE (sem compressão) por
+    // padrão, e o arquivo sai ~4x maior que o molde original à toa.
+    const outBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+    const outPath = path.join(os.tmpdir(), `Daily Activity Report_${irNumber}.xlsx`)
+    fs.writeFileSync(outPath, outBuf)
+    return outPath
+  } catch (err: any) {
+    log(`  ⚠ Falha ao gerar o Daily Activity Report a partir do molde: ${err.message || err}`)
     return null
   }
-
-  const outPath = path.join(os.tmpdir(), `Daily Activity Report_${irNumber}.xlsx`)
-  await wb.xlsx.writeFile(outPath)
-  return outPath
 }
 
 /** Acha o número do relatório (IR######, formato diferente do INC) — a própria
@@ -1068,6 +1116,21 @@ class InspectionReportFiller extends ServiceNowFormFiller {
       this.log(`  ⚠ Inspection Report submetido, mas a página não confirmou carregamento em ~30s — seguindo mesmo assim.`)
     }
     return true
+  }
+
+  /** Confere se já existe um anexo "Daily Activity Report" na lista de anexos da
+   * tela (visível tanto pra Inspection Report recém-criado quanto já existente)
+   * — usa o mesmo texto do rótulo de download achado no diagnóstico real
+   * ("Download attachment <nome do arquivo>"). Usuário pediu: sem isso, rodar a
+   * automação de novo pra uma turbina cujo Inspection Report já existia subia o
+   * Daily Activity Report DE NOVO toda vez, gerando duplicata. */
+  async hasDailyActivityReportAttached(): Promise<boolean> {
+    const scope = this.getScope()
+    const existing = scope
+      .locator('a[aria-label*="Daily Activity Report" i]')
+      .or(scope.getByText(/daily activity report/i))
+      .first()
+    return await existing.isVisible({ timeout: 2000 }).catch(() => false)
   }
 
   /** Anexa um arquivo já gerado (o Daily Activity Report) na tela do Inspection
@@ -1678,14 +1741,24 @@ export async function runFullAutomation(
       // Report (instrução visível na própria página), com o número do relatório
       // (IR######, não o INC) no nome do arquivo — esse número está embutido no
       // próprio texto de instruções, não precisa de campo separado.
-      const irNumber = await extractDailyReportIrNumber(page, log)
-      if (irNumber) {
-        const reportPath = await generateDailyActivityReport(data, entry.dataColeta, i, irNumber, log)
-        if (reportPath) {
-          await filler.uploadAttachment(reportPath, 'Daily Activity Report')
-        }
+      //
+      // Bug real achado pelo usuário: rodando a automação de novo pra uma
+      // turbina cujo Inspection Report já existia (`state === 'show'`), o
+      // Daily Activity Report subia DE NOVO toda vez — sem checar se já tinha
+      // sido enviado numa rodada anterior. Agora confere a lista de anexos já
+      // existente na tela ANTES de gerar/subir nada.
+      if (await filler.hasDailyActivityReportAttached()) {
+        log(`  ℹ ${prefix} Daily Activity Report já estava anexado — não sobe de novo.`)
       } else {
-        log(`  ⚠ ${prefix} Não achou o número do relatório na tela — Daily Activity Report não foi gerado.`)
+        const irNumber = await extractDailyReportIrNumber(page, log)
+        if (irNumber) {
+          const reportPath = await generateDailyActivityReport(data, entry.dataColeta, i, irNumber, log)
+          if (reportPath) {
+            await filler.uploadAttachment(reportPath, 'Daily Activity Report')
+          }
+        } else {
+          log(`  ⚠ ${prefix} Não achou o número do relatório na tela — Daily Activity Report não foi gerado.`)
+        }
       }
 
       // A página já está onde o Módulo 24 espera estar depois de receber uma

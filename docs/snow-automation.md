@@ -2203,3 +2203,58 @@ exatamente com o relatado: "não faz nada, nem o modal abre".
 (`button.sp-attachment-add` ou `button[aria-label="Add attachments"
 i]`) PRIMEIRO, sozinho — só cai no seletor largo antigo (que pode
 pegar o elemento errado) se esse específico não existir na tela.
+
+## Fix de verdade #2: molde reconstruído dava erro no ServiceNow — precisa ser bit-a-bit o original
+
+Usuário testou o molde reconstruído do zero (v1.15.0, pra contornar o
+ExcelJS travando) e confirmou: "essa mudança no layout do daily não
+funcionou, tem que ser exatamente o template deles... os que eu subi
+dão erro na hora de finalizar." Ou seja, o ServiceNow (ou alguma
+validação ligada à conclusão do Inspection Report) rejeita um arquivo
+que não seja estruturalmente idêntico ao molde oficial — mesmo tendo a
+mesma aba "Activities" com as mesmas colunas.
+
+**Fix de verdade**: em vez de reconstruir o molde, `resources/
+daily_activity_report_template.xlsx` agora é uma CÓPIA BIT-A-BIT do
+molde oficial fornecido pelo usuário (baixado direto do link do
+ServiceNow, em branco, sem nenhuma edição). E como o ExcelJS trava pra
+sempre tentando ler esse arquivo (confirmado isolado, até no arquivo
+original sem edição nenhuma — provável extensão XML de Excel mais nova
+que o ExcelJS não processa), `generateDailyActivityReport` agora edita
+o XML bruto de dentro do `.xlsx` (que é só um `.zip`) via `JSZip`
+(dependência que já existia no projeto, usada em `horizon.ts`) — sem
+nunca passar pelo parser do ExcelJS:
+- `findActivitiesSheetPath` acha dinamicamente qual `sheetN.xml` é a
+  aba "Activities" (via `workbook.xml` + `workbook.xml.rels`), em vez
+  de assumir `sheet1.xml` — sobrevive a um molde reorganizado no
+  futuro.
+- Nas linhas 5-7 do molde em branco, a célula `L` (Working Time) já
+  existe vazia (`<c r="L5" s="2"/>`) — única âncora confiável, já que
+  as colunas A-K não têm NENHUMA célula ainda numa linha em branco de
+  verdade. O código insere as novas células (A, B, D, E, J, K, como
+  texto inline `t="inlineStr"`) bem antes dessa âncora, na ordem certa
+  de coluna, e só então dá valor pra própria célula L.
+- Se a âncora não bater (molde mudou de estrutura), lança um erro claro
+  em vez de gerar um arquivo quebrado silenciosamente.
+- Resto do arquivo (fórmulas W/X/Y, estilos, abas ReadMe/dropdowns/
+  Variables, tabelas do Excel) fica 100% intacto — só as 3 linhas de
+  dados são tocadas.
+- `compression: 'DEFLATE'` no `zip.generateAsync` — sem isso o JSZip
+  usa STORE (sem compressão) por padrão e o arquivo sai ~4x maior à
+  toa.
+
+Testado isolado (fora do app) contra o molde de verdade: gera o
+arquivo, abre certinho no openpyxl com as 4 abas intactas e os valores
+das 3 linhas corretos.
+
+## Feature: não sobe o Daily Activity Report de novo se já estava anexado
+
+Usuário pediu: "é importante verificar se o Daily já subiu porque toda
+vez que eu rodo o programa ele sobe o daily novamente" — rodando a
+automação de novo pra uma turbina cujo Inspection Report já existia
+(`state === 'show'`), o anexo subia de novo, gerando duplicata.
+
+**Fix**: novo método `InspectionReportFiller.hasDailyActivityReportAttached()`
+confere a lista de anexos já existente na tela (mesmo texto de rótulo
+achado no diagnóstico real, "Daily Activity Report") ANTES de gerar ou
+subir qualquer coisa — se já estiver lá, só loga e pula.
