@@ -2100,3 +2100,29 @@ provável: esse teste rodou pelo fluxo "Turbina manual / Rodar Agora"
 "Automação Completa" — só esse último passa por esse trecho de código.
 Perguntado ao usuário qual fluxo foi usado; aguardando confirmação
 antes de investigar mais fundo.
+
+**Atualização**: usuário confirmou que usou "Automação Completa" +
+Submissão Automática. Log real da rodada mostrou:
+`✓ Auditoria do Inspection Report: todos os campos conferidos batem.`
+seguido de `⚠ Não abriu o seletor de arquivo pra anexar Daily Activity
+Report.` — ou seja, `verifyFilled` estava funcionando desde o início
+(só não tinha sido notado no log anterior); o bug de verdade era só no
+upload do anexo.
+
+## Fix: upload do Daily Activity Report — modal de 2 cliques, não 1
+
+Print do usuário da tela do Inspection Report já existente confirmou:
+diferente do formulário de Damage Entry (onde o botão "Add attachments"
+abre o seletor nativo de arquivo direto no clique), o ícone de anexo
+(📎) do CABEÇALHO de um registro já salvo abre primeiro um MODAL "Add
+attachments" com um link "Choose a file" DENTRO — só esse segundo
+clique dispara o seletor de arquivo de verdade. `uploadAttachment`
+tentava só o primeiro clique, esperava o evento `filechooser` 5s, e
+desistia.
+
+**Fix**: `uploadAttachment` agora cobre os dois fluxos — tenta o
+seletor direto no primeiro clique (mantém compatível com o padrão do
+Damage Entry, se algum dia for reaproveitado lá); se não abrir, confere
+se apareceu o modal com "Choose a file" e clica nele, só então espera o
+`filechooser` de novo. Fecha o modal pelo botão "Close" no final, se
+ainda estiver aberto.

@@ -1071,8 +1071,16 @@ class InspectionReportFiller extends ServiceNowFormFiller {
   }
 
   /** Anexa um arquivo já gerado (o Daily Activity Report) na tela do Inspection
-   * Report — mesmo botão "Add attachments" (📎) usado pras fotos/vídeos de
-   * defeito, mesma rede de segurança contra abrir aba nova sem querer. */
+   * Report. Achado real em teste (print do usuário): diferente do formulário de
+   * Damage Entry (onde o botão "Add attachments" já abre o seletor nativo de
+   * arquivo direto no clique), o ícone de anexo (📎) do CABEÇALHO de um registro
+   * já existente (Inspection Report em modo "show"/já submetido) abre primeiro um
+   * MODAL "Add attachments" com um link "Choose a file" DENTRO — só esse segundo
+   * clique dispara o seletor de arquivo de verdade. O código tentava só o
+   * primeiro clique e desistia ("Não abriu o seletor de arquivo"). Agora cobre os
+   * dois fluxos: se o seletor já abrir no primeiro clique (padrão do Damage
+   * Entry), usa ele; se não abrir mas o modal aparecer, clica "Choose a file"
+   * dentro dele. */
   async uploadAttachment(filePath: string, label: string): Promise<boolean> {
     const scope = this.getScope()
     const attachmentBtn = scope
@@ -1087,9 +1095,20 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     }
 
     const pagesBefore = this.page.context().pages().length
-    const fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null)
+    let fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null)
     await attachmentBtn.click({ force: true }).catch(() => {})
-    const fileChooser = await fileChooserPromise
+    let fileChooser = await fileChooserPromise
+
+    if (!fileChooser) {
+      // Não abriu direto — confere se caiu no modal "Add attachments" com
+      // "Choose a file" dentro, e clica nele.
+      const chooseFileLink = scope.getByText(/choose a file/i).first()
+      if (await chooseFileLink.isVisible({ timeout: 2000 }).catch(() => false)) {
+        fileChooserPromise = this.page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null)
+        await chooseFileLink.click({ force: true }).catch(() => {})
+        fileChooser = await fileChooserPromise
+      }
+    }
 
     const pagesNow = this.page.context().pages()
     if (pagesNow.length > pagesBefore) {
@@ -1106,6 +1125,14 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     await fileChooser.setFiles([filePath])
     this.log(`  ✓ ${label} anexado: ${path.basename(filePath)}`)
     await this.page.waitForTimeout(1500)
+
+    // Se o modal "Add attachments" ainda estiver aberto (fluxo de 2 cliques),
+    // fecha pelo X antes de seguir — evita ele ficar cobrindo a tela.
+    const closeModalBtn = scope.locator('[aria-label="Close" i]').first()
+    if (await closeModalBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await closeModalBtn.click({ force: true }).catch(() => {})
+    }
+
     return true
   }
 
