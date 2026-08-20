@@ -2126,3 +2126,30 @@ Damage Entry, se algum dia for reaproveitado lá); se não abrir, confere
 se apareceu o modal com "Choose a file" e clica nele, só então espera o
 `filechooser` de novo. Fecha o modal pelo botão "Close" no final, se
 ainda estiver aberto.
+
+## Fix: login não detectava a tela de autenticação de dois fatores (2FA)
+
+Usuário reportou: "ele detectou o login ao colocar e-mail e senha mas
+tem a autenticação de dois fatores... ele considerou o login, fechou a
+aba de 2FA e já tentou procurar o formulário" — travando o resto da
+automação, porque a sessão na verdade ainda não estava autenticada de
+verdade.
+
+**Causa raiz**: `isLoginPage()` só reconhecia a tela de usuário/senha
+(campo de senha visível + texto "sign in"/"entrar") ou URLs de
+login/SSO/OAuth conhecidas. Assim que o campo de senha some da tela
+(indo pra tela de 2FA), `isLoginPage()` já retornava `false` — o robô
+achava que o login tinha terminado, fechava a aba de checagem (padrão
+já usado pra não deixar ela contaminando o resto da sessão), e partia
+pra procurar o formulário com uma sessão que ainda esperava o segundo
+fator.
+
+**Fix**: `isLoginPage()` agora também reconhece telas de 2FA/MFA — por
+URL (login.microsoftonline.com, okta.com, processauth, /kmsi — padrões
+comuns de provedores de SSO corporativo) e por texto visível na tela
+("two-factor", "verify your identity", "approve sign in", "enter the
+code", "autenticação de dois fatores", "digite o código", etc, em
+inglês e português). `ensureAuthenticatedPage` já tinha o loop de
+espera certo (até 5 minutos, dando tempo de alguém aprovar/digitar o
+código) — só precisava saber reconhecer que ainda estava numa etapa de
+login, não fechar a aba cedo demais.

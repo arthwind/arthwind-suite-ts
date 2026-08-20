@@ -2783,16 +2783,33 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn, skipVideoAu
  * Report já autenticado e carregado por completo. */
 async function isLoginPage(page: Page): Promise<boolean> {
   const url = page.url().toLowerCase()
-  if (/\/login\.do|signin\.do|\/sso\/|\/oauth\/|\/auth\/login/i.test(url)) return true
+  if (/\/login\.do|signin\.do|\/sso\/|\/oauth\/|\/auth\/login|processauth|\/kmsi|microsoftonline\.com|okta\.com/i.test(url)) return true
 
   const scopes = [page, ...page.frames()]
   for (const s of scopes) {
     const passwordVisible = await s.locator('input[type="password"]').first().isVisible({ timeout: 500 }).catch(() => false)
-    if (!passwordVisible) continue
-    const hasSignInCue =
-      (await s.getByRole('button', { name: /sign in|log in|entrar/i }).first().isVisible({ timeout: 500 }).catch(() => false)) ||
-      (await s.getByText(/sign in to continue|entre com sua conta/i).first().isVisible({ timeout: 500 }).catch(() => false))
-    if (hasSignInCue) return true
+    if (passwordVisible) {
+      const hasSignInCue =
+        (await s.getByRole('button', { name: /sign in|log in|entrar/i }).first().isVisible({ timeout: 500 }).catch(() => false)) ||
+        (await s.getByText(/sign in to continue|entre com sua conta/i).first().isVisible({ timeout: 500 }).catch(() => false))
+      if (hasSignInCue) return true
+    }
+
+    // Tela de autenticação de dois fatores (2FA/MFA) — não tem campo de senha
+    // visível (a senha já foi digitada e aceita), mas o login AINDA não terminou.
+    // Bug real achado pelo usuário: sem essa checagem, assim que o campo de senha
+    // sumia da tela (indo pra tela de 2FA), o robô já considerava "login
+    // concluído", fechava a aba de checagem achando que a sessão estava pronta, e
+    // saía procurando o formulário — com uma sessão que na verdade ainda esperava
+    // o segundo fator, travando o resto da automação.
+    const has2faCue = await s
+      .getByText(
+        /two-factor|two factor|verify your identity|approve sign in|authenticator app|enter the code|enter code|we sent a code|verifica[çc][ãa]o em duas etapas|autentica[çc][ãa]o de dois fatores|digite o c[óo]digo|aprovar solicita[çc][ãa]o/i
+      )
+      .first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false)
+    if (has2faCue) return true
   }
   return false
 }
