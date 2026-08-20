@@ -39,8 +39,7 @@ export interface DamageReportRow {
   amountOfFindings: number // sempre 1
   photoUrls: string[] // 1+ fotos — sobem numeradas 01_/02_/... (form pede isso pra sequência)
   isBlankImage?: boolean
-  excelRowIndex: number // linha (1-based) na planilha original — usado pra escrever de
-  // volta o número da entrada do SNOW na coluna "SNOW Entry #" depois de submeter
+  excelRowIndex: number // linha (1-based) na planilha original
 }
 
 
@@ -748,43 +747,19 @@ class DamageEntryFiller extends ServiceNowFormFiller {
     }
   }
 
-  /** Lê o valor do campo "Number" (label exata — "Blade serial number" também contém a
-   * palavra "number" como substring, por isso `exact: true` aqui, ao contrário do resto
-   * do arquivo que usa `exact: false`) depois de submeter — é o identificador que o
-   * ServiceNow gera pra entrada recém-criada (ex.: "DAM1115650"), usado pra gravar de
-   * volta na planilha (ver writeBackEntryNumber em runSnowDamageAutomation).
+  /** Clica Submit — extraído de `fill()` pra poder ser chamado separadamente na Fase
+   * 3 (vídeo), DEPOIS de confirmar que o upload de verdade terminou (submeter antes
+   * disso submeteria o formulário sem o anexo).
    *
-   * Bug real achado em teste: `.first()` sozinho podia pegar o campo ERRADO — o
-   * formulário tem MAIS DE UM campo/referência que pode responder a um rótulo
-   * "Number" (ex.: o "Inspection Report" é uma referência tipo "IR0066548", que é do
-   * AEROGERADOR inteiro, não do defeito) — resultado: a coluna "SNOW Entry #" da
-   * planilha ficava com o IR do aero repetido em vez do DAM individual de cada linha.
-   * Corrigido varrendo TODOS os candidatos que batem com o rótulo "Number" e só aceita
-   * um valor que tenha o formato de verdade de uma entrada de dano ("DAM" + números) —
-   * rejeita qualquer outro formato (IR..., INC..., TASK...) mesmo que compartilhe o
-   * rótulo. */
-  private async readSubmittedEntryNumber(): Promise<string> {
-    const scope = this.getScope()
-    const candidates = scope.getByLabel('Number', { exact: true })
-    await candidates.first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
-
-    const count = await candidates.count().catch(() => 0)
-    for (let i = 0; i < count; i++) {
-      const field = candidates.nth(i)
-      const val = (
-        (await field.inputValue().catch(() => '')) ||
-        (await field.textContent().catch(() => '')) ||
-        ''
-      ).trim()
-      if (/^DAM\d+$/i.test(val)) return val
-    }
-    return ''
-  }
-
-  /** Clica Submit e lê o número da entrada criada — extraído de `fill()` pra poder
-   * ser chamado separadamente na Fase 3 (vídeo), DEPOIS de confirmar que o upload
-   * de verdade terminou (submeter antes disso submeteria o formulário sem o anexo). */
-  async submitAndReadEntry(): Promise<string | null> {
+   * NÃO tenta mais ler o número da entrada criada (ex.: "DAM1115650") de volta da
+   * tela — confirmado pelo usuário que esse valor nunca fica acessível durante a
+   * submissão (só aparece depois, numa planilha de auditoria à parte do
+   * ServiceNow); a tentativa de ler sempre falhava (5s de espera à toa em toda
+   * submissão) e nunca tinha como preencher a coluna "SNOW Entry #" de verdade. A
+   * detecção de "já submetido" continua garantida só pela auditoria ao vivo da
+   * tabela do ServiceNow (`checkRowExistsInLiveTable`/`auditLiveDamageEntries`),
+   * que não depende desse número. */
+  async submitAndReadEntry(): Promise<void> {
     this.log(`  Submetendo formulário...`)
     const submitted = await this.submitForm()
     if (!submitted) {
@@ -793,14 +768,6 @@ class DamageEntryFiller extends ServiceNowFormFiller {
 
     await this.page.waitForLoadState('networkidle').catch(() => {})
     await this.page.waitForTimeout(1000)
-
-    const entryNumber = await this.readSubmittedEntryNumber().catch(() => '')
-    if (entryNumber) {
-      this.log(`  ✓ Entrada criada: ${entryNumber}`)
-    } else {
-      this.log(`  ⚠ Não deu pra ler o número da entrada recém-criada — essa linha não será marcada na planilha (a auditoria ao vivo ainda pode detectar na próxima rodada).`)
-    }
-    return entryNumber || null
   }
 
   async fill(
@@ -808,7 +775,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
     localPhotoFiles: string[] = [],
     autoSubmit: boolean = false,
     waitForVideoUpload: boolean = true
-  ): Promise<string | null> {
+  ): Promise<void> {
     this.log(
       `Preenchendo: ${data.bladeSerialNumber} | ${data.subComponent} | ${data.failureType} | DF ${data.dfDistanceStart}-${data.dfDistanceEnd}`
     )
@@ -865,10 +832,9 @@ class DamageEntryFiller extends ServiceNowFormFiller {
 
     // Submissão do formulário: somente realizada se autoSubmit for true
     if (autoSubmit) {
-      return await this.submitAndReadEntry()
+      await this.submitAndReadEntry()
     } else {
       this.log(`  ✓ Formulário e fotos preenchidos! (Modo conferência ativo: mantendo formulário aberto).`)
-      return null
     }
   }
 
@@ -1694,29 +1660,17 @@ export async function runFullAutomation(
 // E DF Start | F DF End | G PD Start | H PD End | I Inside/Outside |
 // J Blade section | K Blade sub-section | L Blade area | M Size | N Link das fotos
 
-async function readDamageRows(excelPath: string): Promise<{ rows: DamageReportRow[]; skippedAlreadySubmitted: number }> {
+async function readDamageRows(excelPath: string): Promise<{ rows: DamageReportRow[] }> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.readFile(excelPath)
   const ws = wb.worksheets[0]
   const rows: DamageReportRow[] = []
   let lastValidBladeSerial = ''
-  let skippedAlreadySubmitted = 0
 
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r)
     const rawBlade = String(row.getCell(1).value ?? '').trim()
     if (!rawBlade) continue
-
-    // "SNOW Entry #" (coluna 17) já preenchida = essa linha já foi submetida pelo
-    // robô numa rodada anterior — é a ÚNICA fonte de verdade de "já submetido" agora,
-    // escrita na própria planilha (ver writeBackEntryNumber). Substitui o antigo
-    // histórico local em JSON (snow_submitted_rows.json), que podia discordar da
-    // planilha — agora só existe uma fonte, não duas pra ficarem desatualizadas entre si.
-    const existingEntryNumber = String(row.getCell(17).value ?? '').trim()
-    if (existingEntryNumber) {
-      skippedAlreadySubmitted++
-      continue
-    }
 
     let isBlankImage = false
     let bladeSerial = rawBlade
@@ -1772,7 +1726,7 @@ async function readDamageRows(excelPath: string): Promise<{ rows: DamageReportRo
       excelRowIndex: r
     })
   }
-  return { rows, skippedAlreadySubmitted }
+  return { rows }
 }
 
 
@@ -2929,27 +2883,6 @@ export async function checkRowExistsInLiveTable(page: Page, row: DamageReportRow
 
 
 
-/** Grava o número da entrada recém-criada (ex.: "DAM1115650") na coluna "SNOW Entry #"
- * (17) da linha correspondente na planilha ORIGINAL, e salva o arquivo imediatamente —
- * não em lote no final, pra não perder o progresso se a automação cair no meio de um
- * lote grande. Essa gravação é o que faz a planilha virar a única fonte de verdade de
- * "já submetido" (ver readDamageRows), substituindo o antigo histórico local em JSON. */
-async function writeBackEntryNumber(
-  wsWrite: ExcelJS.Worksheet,
-  wbWrite: ExcelJS.Workbook,
-  excelPath: string,
-  excelRowIndex: number,
-  entryNumber: string,
-  log: LogFn
-): Promise<void> {
-  try {
-    wsWrite.getRow(excelRowIndex).getCell(17).value = entryNumber
-    await wbWrite.xlsx.writeFile(excelPath)
-  } catch (err: any) {
-    log(`  ⚠ Não foi possível gravar "${entryNumber}" na planilha (linha ${excelRowIndex}): ${err.message || err}`)
-  }
-}
-
 /** Gera as mesmas chaves que `scanDamageEntriesTableByColumn` monta ao ler a tabela ao
  * vivo do ServiceNow (shortSn+DF) — usado pra checar se uma linha da planilha já está
  * cadastrada, ANTES de começar a processar (não só depois, por linha, como
@@ -3211,21 +3144,10 @@ export async function runSnowDamageAutomation(
 ): Promise<RunAutomationResult> {
   const log = log_fn || (() => {})
   try {
-    const { rows: allRows, skippedAlreadySubmitted } = await readDamageRows(excelPath)
-    if (skippedAlreadySubmitted > 0) {
-      log(`ℹ ${skippedAlreadySubmitted} linha(s) já marcada(s) como submetida(s) na planilha (coluna "SNOW Entry #") foram ignoradas.`)
-    }
+    const { rows: allRows } = await readDamageRows(excelPath)
     if (allRows.length === 0) {
       return { success: false, processed: 0, failed: 0, errors: [], error: 'Nenhuma linha válida na planilha.' }
     }
-
-    // Workbook separado, aberto uma vez, só pra ESCREVER de volta o número da entrada
-    // criada em cada linha (coluna "SNOW Entry #") — ver writeBackEntryNumber. Salva a
-    // cada linha bem-sucedida (não em lote no final), pra não perder progresso se a
-    // automação for interrompida no meio de um lote grande.
-    const wbWrite = new ExcelJS.Workbook()
-    await wbWrite.xlsx.readFile(excelPath)
-    const wsWrite = wbWrite.worksheets[0]
 
     // Mapeia previamente todas as fotos da pasta local Fotos/ do Módulo 23
     const photosMap = options.localPhotosDir ? buildLocalPhotosMap(options.localPhotosDir) : new Map()
@@ -3581,16 +3503,9 @@ export async function runSnowDamageAutomation(
         }
 
         const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
-        const entryNumber = await filler.fill(row, localPhotos, autoSubmit)
+        await filler.fill(row, localPhotos, autoSubmit)
 
         processed++
-
-        // Grava o número da entrada na planilha (só existe se autoSubmit e a leitura
-        // pós-submit deu certo) — é isso que faz essa linha não ser reprocessada numa
-        // próxima rodada (ver readDamageRows).
-        if (autoSubmit && entryNumber) {
-          await writeBackEntryNumber(wsWrite, wbWrite, excelPath, row.excelRowIndex, entryNumber, log)
-        }
 
         log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
 
@@ -3715,11 +3630,8 @@ export async function runSnowDamageAutomation(
           }
 
           try {
-            const entryNumber = await tab.filler.submitAndReadEntry()
+            await tab.filler.submitAndReadEntry()
             videosFilled++
-            if (entryNumber) {
-              await writeBackEntryNumber(wsWrite, wbWrite, excelPath, tab.row.excelRowIndex, entryNumber, log)
-            }
             log(`  ✓ ${tab.prefix} Upload confirmado e entrada submetida: "${tab.expectedFilename}".`)
             await tab.formPage.close().catch(() => {})
           } catch (err: any) {

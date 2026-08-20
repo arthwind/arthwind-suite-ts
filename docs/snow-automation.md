@@ -2063,3 +2063,40 @@ de texto explicativo que ainda restavam no módulo (descrição da
 "Automação Completa", legenda da pasta de fotos, legenda da faixa de
 linhas). Regra gravada em memória pra valer daqui pra frente em
 qualquer módulo, não só nesse.
+
+## Removida a tentativa (sempre inútil) de ler o número DAM da tela
+
+Usuário confirmou: o número da entrada recém-criada (ex.: "DAM1115650")
+NUNCA fica acessível durante a submissão — só aparece depois, numa
+planilha de auditoria à parte do ServiceNow, não na tela ao vivo. A
+automação vinha tentando ler isso mesmo assim
+(`readSubmittedEntryNumber`, com até 5s de espera por submissão) pra
+gravar na coluna "SNOW Entry #" da planilha (`writeBackEntryNumber`) e
+usar isso como sinal de "já submetido" numa próxima rodada
+(`readDamageRows`). Como o valor nunca vinha, essa tentativa SEMPRE
+falhava silenciosamente — só desperdiçava ~5s por linha em modo
+Submissão Automática (defeitos e vídeos) e nunca preenchia a coluna de
+verdade.
+
+**Fix**: removida a tentativa de leitura inteira —
+`readSubmittedEntryNumber`, `writeBackEntryNumber` e a checagem da
+coluna "SNOW Entry #" em `readDamageRows` foram excluídos.
+`submitAndReadEntry` agora só clica Submit e loga sucesso, sem tentar
+ler nada de volta. Isso NÃO enfraquece a detecção de "já submetido" —
+essa detecção sempre foi garantida de verdade pela auditoria ao vivo da
+tabela do ServiceNow (`checkRowExistsInLiveTable`/
+`auditLiveDamageEntries`, que casa pá+DF+seção direto na tabela),
+independente desse número.
+
+## Pendência: auditoria do Inspection Report / Daily Activity Report não apareceu no log
+
+Usuário reportou não ver nada no log sobre a segunda auditoria
+(`verifyFilled`) nem sobre o upload do Daily Activity Report num teste
+recente. Conferido o código: está corretamente incondicional (roda
+tanto pra Inspection Report recém-criado quanto já existente, antes de
+fechar a aba), então não é um bug óbvio de lógica. Hipótese mais
+provável: esse teste rodou pelo fluxo "Turbina manual / Rodar Agora"
+(que chama o Módulo 24 direto, sem passar pela Fase 0) em vez de
+"Automação Completa" — só esse último passa por esse trecho de código.
+Perguntado ao usuário qual fluxo foi usado; aguardando confirmação
+antes de investigar mais fundo.
