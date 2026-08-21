@@ -44,6 +44,21 @@ export default function SnowAutomationModule({ D }) {
   const [result, setResult] = useState(null);
   const logsEndRef = useRef(null);
 
+  // ── Pausar/Parar ──────────────────────────────────────────────────────────
+  const [paused, setPaused] = useState(false);
+
+  // ── Gerenciador de abas abertas ───────────────────────────────────────────
+  const [openTabs, setOpenTabs] = useState([]);
+
+  // ── Configuração por parque (líder/técnicos/PO) ───────────────────────────
+  const [windfarmConfigs, setWindfarmConfigs] = useState([]);
+  const [showWindfarmConfig, setShowWindfarmConfig] = useState(false);
+  const [wfEditing, setWfEditing] = useState(null); // null = form fechado
+  const [wfName, setWfName] = useState('');
+  const [wfLeader, setWfLeader] = useState('');
+  const [wfTechnicians, setWfTechnicians] = useState('');
+  const [wfPurchaseOrder, setWfPurchaseOrder] = useState('');
+
 
 
   useEffect(() => {
@@ -58,6 +73,29 @@ export default function SnowAutomationModule({ D }) {
     };
     window.addEventListener('snow_automation_log', handleLog);
     return () => window.removeEventListener('snow_automation_log', handleLog);
+  }, []);
+
+  // Gerenciador de abas: só faz sentido consultar enquanto uma automação está
+  // rodando de verdade (abas de revisão só existem durante/depois de um "Rodar").
+  useEffect(() => {
+    if (!busy) return;
+    let cancelled = false;
+    const poll = async () => {
+      const tabs = await window.pywebview.api.snow_automation_list_open_tabs().catch(() => []);
+      if (!cancelled) setOpenTabs(tabs);
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [busy]);
+
+  const loadWindfarmConfigs = async () => {
+    const list = await window.pywebview.api.snow_windfarm_config_list().catch(() => []);
+    setWindfarmConfigs(list);
+  };
+
+  useEffect(() => {
+    loadWindfarmConfigs();
   }, []);
 
   useEffect(() => {
@@ -120,6 +158,8 @@ export default function SnowAutomationModule({ D }) {
   // correspondente — sem pedir nenhuma URL de Damage Report separada.
   const handleRunFullAutomation = async (mode) => {
     if (!controlXlsxPath || !wtgRootFolder || !portalOrigin.trim() || !technician.trim()) return;
+    await window.pywebview.api.snow_automation_reset_control();
+    setPaused(false);
     setRunningFullAutomation(true);
     setLogs((prev) => [...prev, {
       text: mode === 'next'
@@ -143,7 +183,12 @@ export default function SnowAutomationModule({ D }) {
           moduleOptions: { autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }
         }
       );
-      if (res.success) {
+      if (res.stopped) {
+        setLogs((prev) => [...prev, {
+          text: `⏹ Parado pelo usuário: ${res.processed} ok, ${res.failed} falha(s).`,
+          type: 'warning'
+        }]);
+      } else if (res.success) {
         setLogs((prev) => [...prev, {
           text: `✓ Automação Completa concluída: ${res.processed} ok, ${res.failed} falha(s), ${res.skippedNoFolder} sem pasta pronta ainda.`,
           type: res.failed > 0 ? 'warning' : 'success'
@@ -224,6 +269,8 @@ export default function SnowAutomationModule({ D }) {
   const handleRun = async () => {
     if (!excelPath || !incidentUrl.trim()) return;
 
+    await window.pywebview.api.snow_automation_reset_control();
+    setPaused(false);
     setRunning(true);
     setRan(false);
     setLogs([]);
@@ -235,7 +282,9 @@ export default function SnowAutomationModule({ D }) {
     try {
       const res = await window.pywebview.api.snow_automation_run(excelPath, incidentUrl.trim(), options);
       setResult(res);
-      if (res.success && res.dryRun) {
+      if (res.stopped) {
+        setLogs((prev) => [...prev, { text: `⏹ Parado pelo usuário: ${res.processed} ok, ${res.failed} falha(s).`, type: 'warning' }]);
+      } else if (res.success && res.dryRun) {
         const total = (res.missingDefects || 0) + (res.missingBlanks || 0) + (res.missingVideos || 0);
         setLogs((prev) => [...prev, {
           text: total === 0
@@ -283,6 +332,8 @@ export default function SnowAutomationModule({ D }) {
   const handleRunQueue = async () => {
     if (queue.length === 0 || busy) return;
 
+    await window.pywebview.api.snow_automation_reset_control();
+    setPaused(false);
     setQueueRunning(true);
     setRan(false);
     setResult(null);
@@ -312,6 +363,10 @@ export default function SnowAutomationModule({ D }) {
         const runOptions = { ...item.options, headless, autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }
         const res = await window.pywebview.api.snow_automation_run(item.excelPath, item.incidentUrl, runOptions);
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: res.success ? 'done' : 'failed', result: res } : q)));
+        if (res.stopped) {
+          setLogs((prev) => [...prev, { text: `⏹ Fila parada pelo usuário na turbina ${i + 1}/${items.length}: ${res.processed} ok, ${res.failed} falha(s).`, type: 'warning' }]);
+          break;
+        }
         if (res.success && res.dryRun) {
           const total = (res.missingDefects || 0) + (res.missingBlanks || 0) + (res.missingVideos || 0);
           setLogs((prev) => [...prev, {
@@ -338,6 +393,74 @@ export default function SnowAutomationModule({ D }) {
     setQueueIndex(-1);
     setQueueRunning(false);
     setLogs((prev) => [...prev, { text: `🏁 Fila overnight concluída — ${items.length} turbina(s) processada(s).`, type: 'success' }]);
+  };
+
+  const handlePauseToggle = async () => {
+    if (paused) {
+      await window.pywebview.api.snow_automation_resume();
+      setPaused(false);
+    } else {
+      await window.pywebview.api.snow_automation_pause();
+      setPaused(true);
+    }
+  };
+
+  const handleStop = async () => {
+    await window.pywebview.api.snow_automation_stop();
+  };
+
+  const handleCloseTab = async (id) => {
+    await window.pywebview.api.snow_automation_close_tab(id);
+    setOpenTabs((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleCloseAllTabs = async () => {
+    await window.pywebview.api.snow_automation_close_all_review_tabs();
+    setOpenTabs([]);
+  };
+
+  const handleOpenLogsFolder = async () => {
+    await window.pywebview.api.snow_automation_open_logs_folder();
+  };
+
+  const tabAge = (openedAt) => {
+    const mins = Math.floor((Date.now() - openedAt) / 60000);
+    if (mins < 1) return 'agora';
+    if (mins < 60) return `${mins}min`;
+    return `${Math.floor(mins / 60)}h${mins % 60}min`;
+  };
+
+  const resetWindfarmForm = () => {
+    setWfEditing(null);
+    setWfName('');
+    setWfLeader('');
+    setWfTechnicians('');
+    setWfPurchaseOrder('');
+  };
+
+  const startEditWindfarm = (config) => {
+    setWfEditing(config ? config.windfarm : '__new__');
+    setWfName(config?.windfarm || '');
+    setWfLeader(config?.leader || '');
+    setWfTechnicians((config?.technicians || []).join(', '));
+    setWfPurchaseOrder(config?.purchaseOrder || '');
+  };
+
+  const handleSaveWindfarmConfig = async () => {
+    if (!wfName.trim()) return;
+    await window.pywebview.api.snow_windfarm_config_save({
+      windfarm: wfName.trim(),
+      leader: wfLeader.trim(),
+      technicians: wfTechnicians.split(',').map((t) => t.trim()).filter(Boolean),
+      purchaseOrder: wfPurchaseOrder.trim()
+    });
+    resetWindfarmForm();
+    await loadWindfarmConfigs();
+  };
+
+  const handleDeleteWindfarmConfig = async (windfarm) => {
+    await window.pywebview.api.snow_windfarm_config_delete(windfarm);
+    await loadWindfarmConfigs();
   };
 
   const logColor = (type) => {
@@ -462,6 +585,117 @@ export default function SnowAutomationModule({ D }) {
             </button>
           </div>
         </div>
+
+        {busy && (
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handlePauseToggle}
+              style={{
+                flex: 1,
+                background: paused ? accent : D.bgCard,
+                border: `1px solid ${paused ? accent : D.borderLight}`,
+                color: paused ? '#fff' : D.textPrimary,
+                borderRadius: '8px',
+                padding: '9px',
+                fontSize: '12.5px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              {paused ? '▶ Retomar' : '⏸ Pausar'}
+            </button>
+            <button
+              onClick={handleStop}
+              style={{
+                flex: 1,
+                background: D.bgCard,
+                border: `1px solid ${D.error}80`,
+                color: D.error,
+                borderRadius: '8px',
+                padding: '9px',
+                fontSize: '12.5px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              ⏹ Parar
+            </button>
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowWindfarmConfig((v) => !v)}
+          style={{
+            background: 'none',
+            border: `1px solid ${D.borderLight}`,
+            borderRadius: '8px',
+            padding: '8px 10px',
+            fontSize: '12px',
+            fontWeight: 600,
+            color: D.textSecond,
+            cursor: 'pointer',
+            textAlign: 'left'
+          }}
+        >
+          🌎 Configuração por Parque {showWindfarmConfig ? '▲' : '▼'}
+        </button>
+
+        {showWindfarmConfig && (
+          <div style={{
+            border: `1px solid ${D.borderLight}`,
+            borderRadius: '8px',
+            padding: '10px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}>
+            {windfarmConfigs.length === 0 ? (
+              <div style={{ fontSize: '11px', color: D.textMuted }}>Nenhum parque cadastrado.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {windfarmConfigs.map((c) => (
+                  <div key={c.windfarm} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 8px', borderRadius: '6px', border: `1px solid ${D.borderLight}`
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '11.5px', color: D.textPrimary }}>{c.windfarm}</div>
+                      <div style={{ fontSize: '10px', color: D.textMuted }}>
+                        {c.leader} · {c.technicians.join(', ')} · PO {c.purchaseOrder || '—'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                      <button onClick={() => startEditWindfarm(c)} style={{ background: 'none', border: 0, color: accent, cursor: 'pointer', fontSize: '11px' }}>Editar</button>
+                      <button onClick={() => handleDeleteWindfarmConfig(c.windfarm)} style={{ background: 'none', border: 0, color: D.error, cursor: 'pointer', fontSize: '11px' }}>Remover</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {wfEditing ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                <input type="text" placeholder="Nome do parque (igual ao 'windfarm' da base de pás)" value={wfName}
+                  onChange={(e) => setWfName(e.target.value)} disabled={wfEditing !== '__new__'}
+                  style={{ padding: '7px 9px', borderRadius: '6px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }} />
+                <input type="text" placeholder="Líder" value={wfLeader} onChange={(e) => setWfLeader(e.target.value)}
+                  style={{ padding: '7px 9px', borderRadius: '6px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }} />
+                <input type="text" placeholder="Técnicos (separados por vírgula)" value={wfTechnicians} onChange={(e) => setWfTechnicians(e.target.value)}
+                  style={{ padding: '7px 9px', borderRadius: '6px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }} />
+                <input type="text" placeholder="Purchase Order" value={wfPurchaseOrder} onChange={(e) => setWfPurchaseOrder(e.target.value)}
+                  style={{ padding: '7px 9px', borderRadius: '6px', border: `1px solid ${D.borderLight}`, background: D.bgCard, color: D.textPrimary, fontSize: '12px' }} />
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button onClick={handleSaveWindfarmConfig} style={{ flex: 1, background: accent, border: 0, color: '#fff', borderRadius: '6px', padding: '7px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>Salvar</button>
+                  <button onClick={resetWindfarmForm} style={{ flex: 1, background: 'none', border: `1px solid ${D.borderLight}`, color: D.textSecond, borderRadius: '6px', padding: '7px', fontSize: '11.5px', cursor: 'pointer' }}>Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => startEditWindfarm(null)} style={{ background: 'none', border: `1px dashed ${D.borderLight}`, color: accent, borderRadius: '6px', padding: '7px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>
+                + Adicionar parque
+              </button>
+            )}
+          </div>
+        )}
 
         <label style={{
           display: 'flex',
@@ -863,13 +1097,43 @@ export default function SnowAutomationModule({ D }) {
         minHeight: 0,
         height: '100%'
       }}>
-        {result && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          {result ? (
+            <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
+              <span style={{ color: D.success, fontWeight: 600 }}>{result.processed ?? 0} ok</span>
+              <span style={{ color: result.failed ? D.error : D.textMuted, fontWeight: 600 }}>{result.failed ?? 0} falha(s)</span>
+            </div>
+          ) : <span />}
+          <button
+            onClick={handleOpenLogsFolder}
+            style={{ background: 'none', border: `1px solid ${D.borderLight}`, color: D.textSecond, borderRadius: '6px', padding: '5px 9px', fontSize: '10.5px', cursor: 'pointer' }}
+          >
+            📁 Abrir pasta de logs
+          </button>
+        </div>
+
+        {openTabs.length > 0 && (
           <div style={{
-            display: 'flex', gap: '16px', marginBottom: '14px', fontSize: '12px',
-            padding: '10px 12px', borderRadius: '8px', background: D.bgHover
+            border: `1px solid ${D.borderLight}`,
+            borderRadius: '8px',
+            padding: '8px 10px',
+            marginBottom: '10px',
+            fontSize: '11px'
           }}>
-            <span style={{ color: D.success, fontWeight: 600 }}>{result.processed ?? 0} ok</span>
-            <span style={{ color: result.failed ? D.error : D.textMuted, fontWeight: 600 }}>{result.failed ?? 0} falha(s)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{ fontWeight: 600, color: D.textPrimary }}>Abas abertas ({openTabs.length})</span>
+              <button onClick={handleCloseAllTabs} style={{ background: 'none', border: 0, color: D.error, cursor: 'pointer', fontSize: '10.5px' }}>Fechar todas</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
+              {openTabs.map((t) => (
+                <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px', borderRadius: '5px', background: D.bgHover }}>
+                  <span style={{ color: D.textSecond, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {t.purpose === 'video-review' ? '🎬' : '📝'} {t.turbine || ''} {t.blade ? `· ${t.blade}` : ''} · {t.label} · {tabAge(t.openedAt)}
+                  </span>
+                  <button onClick={() => handleCloseTab(t.id)} style={{ background: 'none', border: 0, color: D.textMuted, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

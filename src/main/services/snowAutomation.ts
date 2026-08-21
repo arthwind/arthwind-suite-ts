@@ -22,6 +22,9 @@ import http from 'http'
 import sharp from 'sharp'
 import { SnowMappings } from './snowProcessor'
 import { getBladesForTurbine } from './bladeSets'
+import { getWindfarmConfig } from './windfarmConfig'
+import { checkpoint, AutomationStoppedError } from './automationControl'
+import { registerTab } from './tabRegistry'
 
 export interface DamageReportRow {
   bladeSerialNumber: string // serial completo (13 dígitos) — bate com o combobox
@@ -862,12 +865,18 @@ export interface InspectionReportData {
   bladeB: InspectionReportBladeData
   bladeC: InspectionReportBladeData
   bladeSetNumber: string | null // os 4 últimos dígitos do serial — mesmo pras 3 pás
+  windfarm: string | null // campo `windfarm` de blade_sets.json — chave pra achar a config do parque
+  purchaseOrder: string | null // vem da config do parque (windfarmConfig.ts) — null se o parque ainda não foi cadastrado
 }
 
 /** Monta `InspectionReportData` pra uma turbina a partir de `blade_sets.json`
  * (via `getBladesForTurbine`) + os dados já lidos da planilha de controle. Não
  * precisa de nada além do WTG e da Data Coleta — os seriais e o Set Number vêm
- * todos da lista de pás. */
+ * todos da lista de pás. O Purchase Order vem da config do PARQUE dessa
+ * turbina (`windfarmConfig.ts`) — cada parque tem o seu, ao contrário do
+ * Blade type/Access method, que são fixos pra toda a campanha (pedido do
+ * usuário: "o modelo de blade não vai mudar", só muda nomenclatura de turbina
+ * e técnicos/PO por parque). */
 export function buildInspectionReportData(
   wtg: string,
   dataColeta: string,
@@ -875,22 +884,26 @@ export function buildInspectionReportData(
 ): InspectionReportData {
   const blades = getBladesForTurbine(wtg)
   const [a, b, c] = blades
+  const windfarm = blades[0]?.windfarm ?? null
+  const config = windfarm ? getWindfarmConfig(windfarm) : null
   return {
     technician,
     inspectionStartDate: dataColeta,
     bladeA: { serial: a?.serial ?? null },
     bladeB: { serial: b?.serial ?? null },
     bladeC: { serial: c?.serial ?? null },
-    bladeSetNumber: blades[0]?.setNumber ?? null
+    bladeSetNumber: blades[0]?.setNumber ?? null,
+    windfarm,
+    purchaseOrder: config?.purchaseOrder || null
   }
 }
 
-/** Valores fixos pra toda a campanha, fechados com o usuário — não variam por
- * turbina nem precisam de fonte de dado nenhuma. */
+/** Valores fixos pra toda a campanha, em QUALQUER parque — pedido do usuário:
+ * o modelo da pá e o método de acesso não mudam entre parques, só a
+ * nomenclatura de turbina e os técnicos/líder/PO (ver `windfarmConfig.ts`). */
 const INSPECTION_REPORT_FIXED = {
   accessMethod: 'Visual inspection: Other',
-  bladeType: 'NR81.5', // NÃO "NR81.5 - AI-D" — tem os dois valores no dropdown
-  purchaseOrder: '0000000014'
+  bladeType: 'NR81.5' // NÃO "NR81.5 - AI-D" — tem os dois valores no dropdown
 }
 
 // ─── Daily Activity Report — anexo obrigatório de toda tela de Inspection Report ──
@@ -900,12 +913,6 @@ const INSPECTION_REPORT_FIXED = {
 // o INC) no nome do arquivo — senão "não será considerado". Pedido do usuário: a
 // automação gera esse arquivo (usando o molde empacotado, `deriveSetNumberFromSerial`-
 // style — sem baixar nada do ServiceNow) e sobe sozinha, junto com o Inspection Report.
-
-/** Nome do "líder" da equipe — fixo pro parque Lagoa dos Ventos (único cadastrado em
- * blade_sets.json hoje). Se um parque novo entrar na base, isso precisa virar
- * configurável por windfarm em vez de constante única. */
-const DAILY_REPORT_LEADER = 'Allan Thiago'
-const DAILY_REPORT_TECHNICIANS = ['Raimundo Nonato', 'Gabriel Lima']
 
 function findDailyReportTemplate(): string | null {
   const candidates = [
@@ -974,8 +981,15 @@ async function generateDailyActivityReport(
     return null
   }
 
+  const config = data.windfarm ? getWindfarmConfig(data.windfarm) : null
+  if (!config) {
+    log(`  ⚠ Parque "${data.windfarm ?? '?'}" sem líder/técnico cadastrado (Configuração por Parque) — pulando Daily Activity Report.`)
+    return null
+  }
+  const technicians = config.technicians.length > 0 ? config.technicians : ['']
+  const technician = technicians[technicianIndex % technicians.length]
+
   const blades = [data.bladeA.serial, data.bladeB.serial, data.bladeC.serial]
-  const technician = DAILY_REPORT_TECHNICIANS[technicianIndex % DAILY_REPORT_TECHNICIANS.length]
   const rowNums = [5, 6, 7]
 
   try {
@@ -1017,7 +1031,7 @@ async function generateDailyActivityReport(
         cellStr(`A${row}`, inspectionDate, 24) +
         cellStr(`B${row}`, serial, 2) +
         cellStr(`C${row}`, `Pitch ${i + 1}`, 2) +
-        cellStr(`D${row}`, DAILY_REPORT_LEADER, 26) +
+        cellStr(`D${row}`, config.leader, 26) +
         cellStr(`E${row}`, technician, 26) +
         cellStr(`J${row}`, 'Inspection Internal', 26) +
         cellStr(`K${row}`, `Blade ${i + 1} Completed`, 26)
@@ -1079,7 +1093,11 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     await this.fillText('Inspection End Date', data.inspectionStartDate)
     await this.selectFromComboBox('Access method', INSPECTION_REPORT_FIXED.accessMethod, 800)
     await this.selectFromComboBox('Blade type', INSPECTION_REPORT_FIXED.bladeType, 800)
-    await this.fillText('Purchase Order', INSPECTION_REPORT_FIXED.purchaseOrder)
+    if (data.purchaseOrder) {
+      await this.fillText('Purchase Order', data.purchaseOrder)
+    } else {
+      this.log(`  ⚠ Parque "${data.windfarm ?? '?'}" sem Purchase Order cadastrado — campo deixado como estava.`)
+    }
 
     if (data.bladeA.serial) await this.fillText('Blade A serial number', data.bladeA.serial)
     else this.log(`  ⚠ Blade A não encontrada em blade_sets.json — campo deixado como estava.`)
@@ -1302,7 +1320,7 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     await checkText('Inspection End Date', data.inspectionStartDate)
     await checkCombo('Access method', INSPECTION_REPORT_FIXED.accessMethod)
     await checkCombo('Blade type', INSPECTION_REPORT_FIXED.bladeType)
-    await checkText('Purchase Order', INSPECTION_REPORT_FIXED.purchaseOrder)
+    await checkText('Purchase Order', data.purchaseOrder)
     await checkText('Blade A serial number', data.bladeA.serial)
     await checkText('Blade B serial number', data.bladeB.serial)
     await checkText('Blade C serial number', data.bladeC.serial)
@@ -1620,6 +1638,9 @@ export interface FullAutomationResult {
   skippedNoFolder: number
   errors: string[]
   error?: string
+  // true quando o usuário pediu Parar no meio da fila — não é uma falha, `success`
+  // continua true, só indica que sobrou turbina sem processar de propósito.
+  stopped?: boolean
 }
 
 export async function runFullAutomation(
@@ -1717,9 +1738,24 @@ export async function runFullAutomation(
   const errors: string[] = []
 
   for (let i = 0; i < toProcess.length; i++) {
+    // Ponto de checagem de Pausar/Parar — sempre ENTRE turbinas, nunca no meio
+    // de uma (pedido do usuário: responder em segundos, não esperar a turbina
+    // inteira acabar). Se Parar foi pedido, sai do loop e devolve resultado
+    // limpo (não é falha) em vez de um erro de verdade.
+    try {
+      await checkpoint(log)
+    } catch (err) {
+      if (err instanceof AutomationStoppedError) {
+        log(`⏹ Parado pelo usuário — ${processed} ok, ${failed} falha(s), ${toProcess.length - i} turbina(s) não processada(s).`)
+        return { success: true, processed, failed, skippedNoFolder, errors, stopped: true }
+      }
+      throw err
+    }
+
     const { entry, folder } = toProcess[i]
     const prefix = `[${i + 1}/${toProcess.length}]`
     const page = await context.newPage()
+    registerTab(page, { purpose: 'transient', turbine: entry.wtg, label: 'Inspection Report' })
     try {
       const found = await findAndOpenIncident(page, portalOrigin, entry.incNumber, log)
       if (!found) throw new Error('INC não encontrado na busca de Technical Incidents.')
@@ -3154,6 +3190,9 @@ export interface RunAutomationResult {
   missingDefects?: number
   missingBlanks?: number
   missingVideos?: number
+  // true quando o usuário pediu Parar no meio — não é falha, `success` continua
+  // true, processed/failed/errors refletem o progresso real até o momento.
+  stopped?: boolean
 }
 
 function isVideoRow(row: DamageReportRow): boolean {
@@ -3335,6 +3374,14 @@ export async function runSnowDamageAutomation(
   log_fn?: LogFn
 ): Promise<RunAutomationResult> {
   const log = log_fn || (() => {})
+  // Declarados FORA do try — precisam ficar acessíveis no catch de baixo pra
+  // reportar progresso real (não zerado) quando a execução é interrompida no
+  // meio por Parar (AutomationStoppedError) em vez de um erro de verdade.
+  let processed = 0
+  let failed = 0
+  const errors: string[] = []
+  let videosFilled = 0
+  let videosFailed = 0
   try {
     const { rows: allRows } = await readDamageRows(excelPath)
     if (allRows.length === 0) {
@@ -3517,10 +3564,6 @@ export async function runSnowDamageAutomation(
       }
     }
 
-    let processed = 0
-    let failed = 0
-    const errors: string[] = []
-
     // ─── Fase 0 (vídeo): dispara o upload de TODOS os vídeos ANTES dos defeitos ───
     // Upload de vídeo é lento no ServiceNow por natureza (processamento do lado do
     // servidor), não por disputa de banda entre abas — então cascatear várias abas
@@ -3546,6 +3589,7 @@ export async function runSnowDamageAutomation(
       }
 
       const targetPage = await context.newPage()
+      registerTab(targetPage, { purpose: 'video-review', blade: row.bladeSerialNumber, label: 'Vídeo (DF 45-50)' })
       await targetPage.bringToFront().catch(() => {})
       await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
 
@@ -3581,13 +3625,12 @@ export async function runSnowDamageAutomation(
     }
 
     const MAX_VIDEO_ROUNDS = 3
-    let videosFilled = 0
-    let videosFailed = 0
     let videoOpenTabs: OpenVideoTab[] = []
 
     if (videoRows.length > 0) {
       log(`🎬 ${videoRows.length} vídeo(s) — disparando upload de cada um antes dos defeitos, pra usar o tempo de preenchimento da Fase 1 como janela de upload.`)
       for (let vi = 0; vi < videoRows.length; vi++) {
+        await checkpoint(log)
         const row = videoRows[vi]
         const prefix = `[Vídeo ${vi + 1}/${videoRows.length}]`
         try {
@@ -3634,6 +3677,11 @@ export async function runSnowDamageAutomation(
       const failedThisRound: DamageReportRow[] = []
 
       for (let i = 0; i < currentRoundRows.length; i++) {
+        // Ponto de checagem — sempre ENTRE linhas, nunca no meio de preencher
+        // um formulário. Deixa propagar direto (não passa pelo catch de baixo,
+        // que trataria como falha de linha) até o topo da função.
+        await checkpoint(log)
+
         const row = currentRoundRows[i]
         const prefix = `[${round > 1 ? `R${round} ` : ''}${i + 1}/${currentRoundRows.length}]`
         // Fora do try pra ficar acessível no catch — precisa disso pra poder fechar a
@@ -3652,11 +3700,17 @@ export async function runSnowDamageAutomation(
         if (autoSubmit) {
           if (!sharedAutoSubmitPage || sharedAutoSubmitPage.isClosed()) {
             sharedAutoSubmitPage = await context.newPage()
+            registerTab(sharedAutoSubmitPage, { purpose: 'transient', label: 'defeitos (auto)' })
           }
           targetPage = sharedAutoSubmitPage
         } else {
           // No modo de conferência manual: abre uma NOVA ABA exclusiva no Chrome para cada linha i
           targetPage = await context.newPage()
+          registerTab(targetPage, {
+            purpose: 'defect-review',
+            blade: row.bladeSerialNumber,
+            label: `${row.subComponent} | ${row.failureType}`
+          })
         }
 
         await targetPage.bringToFront().catch(() => {})
@@ -3868,7 +3922,11 @@ export async function runSnowDamageAutomation(
     log(`Concluído: ${processed} ok, ${failed} falha(s) de ${nonVideoRows.length} defeito(s)/blank(s)${videoRows.length > 0 ? `; ${videosFilled} vídeo(s) ok, ${videosFailed} falha(s)` : ''}.`)
     return { success: true, processed, failed, errors, videosFilled, videosFailed }
   } catch (err: any) {
-    return { success: false, processed: 0, failed: 0, errors: [], error: err.message }
+    if (err instanceof AutomationStoppedError) {
+      log(`⏹ Parado pelo usuário — ${processed} ok, ${failed} falha(s) até o momento.`)
+      return { success: true, processed, failed, errors, videosFilled, videosFailed, stopped: true }
+    }
+    return { success: false, processed, failed, errors, error: err.message }
   }
 }
 

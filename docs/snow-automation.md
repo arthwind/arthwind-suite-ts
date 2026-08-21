@@ -2292,3 +2292,65 @@ Blade C igual está no formulário". Coluna C agora recebe "Pitch 1"/
 "Pitch 2"/"Pitch 3" na mesma ordem das linhas (Blade A/B/C), com o
 estilo padrão da coluna (índice 2, mesmo de B) pra continuar
 desbloqueada. Confirmado com openpyxl no exemplo gerado.
+
+## Features: Pausar/Parar, gerenciador de abas, log em arquivo, config por parque
+
+Quatro pedidos desenhados juntos numa conversa antes de codar (usuário
+pediu pra "desenhar" primeiro, sem build, pra não ficar em tentativa e
+erro):
+
+**1. Pausar/Parar** (`automationControl.ts`) — hoje, pra parar a
+automação por qualquer motivo, só fechando e reabrindo o app. Estado
+compartilhado (`paused`/`stopRequested`) checado por `checkpoint(log)`
+entre uma linha/turbina e outra — NUNCA no meio de preencher um
+formulário (pedido do usuário: responder em segundos, sem deixar nada
+pela metade). Parar lança `AutomationStoppedError`, capturado no topo
+de `runFullAutomation`/`runSnowDamageAutomation` e devolvido como
+resultado limpo (`success:true, stopped:true`, com processed/failed
+reais até aquele ponto) — não é tratado como falha. Efeito colateral
+bom: hoje `processed`/`failed`/`errors` são declarados FORA do try
+principal de `runSnowDamageAutomation` (antes ficavam dentro, então um
+erro de verdade sempre reportava "0 processado" mesmo tendo feito
+bastante coisa — bug preexistente, corrigido de graça).
+
+**2. Gerenciador de abas** (`tabRegistry.ts`) — Playwright já sabe quais
+páginas existem; faltava METADADO (por quê essa aba está aberta, de
+qual turbina/pá). `registerTab(page, info)` chamado em todo
+`context.newPage()` relevante, com `purpose: 'defect-review' |
+'video-review' | 'audit' | 'transient'`. Abas `'transient'` (login,
+auditoria, Inspection Report) esquecidas por mais de 2min são fechadas
+sozinhas numa varredura periódica (30s) — são vazamento de erro, nunca
+guardam trabalho de ninguém. Abas de revisão nunca fecham sozinhas — só
+aparecem na lista da UI, com botão de fechar uma a uma ou todas.
+
+**3. Log completo em arquivo** (`runLogger.ts`) — painel da UI tem
+limite de 800 linhas e sempre rola pra mais recente. Cada execução
+(`snow_automation_run`/`_inspection_report_run`/`_full_automation_run`)
+agora também grava CADA linha, com timestamp, num arquivo próprio em
+`%APPDATA%/ArthwindSuite/logs/` — gravação NA HORA (não em lote no
+final), nunca perde nada mesmo se o app fechar/travar de um jeito feio.
+Marcadores extras (`=== PAUSADO/RETOMADO/PARADO/FECHADO pelo usuário
+às HH:MM:SS ===`) gravados nos pontos que o usuário pediu. Botão "Abrir
+pasta de logs" na UI.
+
+**4. Configuração por parque** (`windfarmConfig.ts`) — usuário: "hoje
+nós estamos fazendo esse modelo voltado pra um parque, vão ter outros
+com outros técnicos... o modelo de blade não vai mudar... o que muda é
+a nomenclatura das turbinas e os técnicos". `DAILY_REPORT_LEADER`/
+`DAILY_REPORT_TECHNICIANS` (constantes fixas, só Lagoa dos Ventos) e
+`INSPECTION_REPORT_FIXED.purchaseOrder` viraram uma config editável por
+parque (`%APPDATA%/ArthwindSuite/windfarm_config.json`), buscada pelo
+campo `windfarm` que `blade_sets.json` já tinha — não precisa de
+nenhuma lógica nova de nomenclatura de turbina (Cajuina usa
+"WTG-B##-##", bem diferente do "VSR##-##" de Lagoa dos Ventos, mas
+`windfarm` já desacopla isso). `Blade type`/`Access method` continuam
+fixos pra qualquer parque, como confirmado pelo usuário. Tela de
+configuração simples na UI (tabela + formulário) pra editar sem
+precisar mexer em código a cada parque novo. Se o parque não estiver
+cadastrado, o Purchase Order/Daily Activity Report ficam pendentes com
+aviso no log, em vez de travar a turbina inteira.
+
+Build verificado abrindo (typecheck + build limpo + app abrindo), UI
+nova conferida visualmente (Pausar/Parar aparecem só com `busy`,
+Configuração por Parque expande/formulário renderiza certo, botão de
+logs no lugar).

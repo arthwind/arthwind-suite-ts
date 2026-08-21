@@ -62,7 +62,18 @@ const ipcMethods = [
   'snow_automation_run',
   'snow_read_turbine_inc_list',
   'snow_inspection_report_run',
-  'snow_full_automation_run'
+  'snow_full_automation_run',
+  'snow_automation_reset_control',
+  'snow_automation_pause',
+  'snow_automation_resume',
+  'snow_automation_stop',
+  'snow_automation_list_open_tabs',
+  'snow_automation_close_tab',
+  'snow_automation_close_all_review_tabs',
+  'snow_automation_open_logs_folder',
+  'snow_windfarm_config_list',
+  'snow_windfarm_config_save',
+  'snow_windfarm_config_delete'
 ]
 
 

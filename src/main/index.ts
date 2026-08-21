@@ -61,6 +61,10 @@ import {
   runInspectionReportPhase,
   runFullAutomation
 } from './services/snowAutomation'
+import { pauseAutomation, resumeAutomation, stopAutomation, resetAutomationControl } from './services/automationControl'
+import { listReviewTabs, closeTab, closeAllReviewTabs, startTabSweep } from './services/tabRegistry'
+import { getLogsDir, wrapWithRunLogger, setCurrentRunLogger, markCurrentRun } from './services/runLogger'
+import { listWindfarmConfigs, saveWindfarmConfig, deleteWindfarmConfig } from './services/windfarmConfig'
 
 
 // Configuration Helpers
@@ -504,9 +508,16 @@ app.whenReady().then(() => {
       incidentUrl: string,
       options: { headless?: boolean; startRow?: number; endRow?: number; selectedBlades?: string[] }
     ) => {
-      return runSnowDamageAutomation(excelPath, incidentUrl, options, (msg: string) => {
+      const { log, logger } = wrapWithRunLogger('snow_defeitos', (msg: string) => {
         event.sender.send('snow_automation_log', { msg })
       })
+      setCurrentRunLogger(logger)
+      try {
+        return await runSnowDamageAutomation(excelPath, incidentUrl, options, log)
+      } finally {
+        logger.close()
+        setCurrentRunLogger(null)
+      }
     }
   )
 
@@ -524,11 +535,67 @@ app.whenReady().then(() => {
       technician: string,
       options: { headless?: boolean; onlyIncNumbers?: string[] }
     ) => {
-      return runInspectionReportPhase(controlXlsxPath, portalOrigin, technician, options, (msg: string) => {
+      const { log, logger } = wrapWithRunLogger('snow_inspection_report', (msg: string) => {
         event.sender.send('snow_automation_log', { msg })
       })
+      setCurrentRunLogger(logger)
+      try {
+        return await runInspectionReportPhase(controlXlsxPath, portalOrigin, technician, options, log)
+      } finally {
+        logger.close()
+        setCurrentRunLogger(null)
+      }
     }
   )
+
+  // ─── SNOW Automation — controle de Pausar/Parar ───────────────────────────────
+  ipcMain.handle('snow_automation_reset_control', async () => {
+    resetAutomationControl()
+    return { success: true }
+  })
+  ipcMain.handle('snow_automation_pause', async () => {
+    pauseAutomation()
+    markCurrentRun('PAUSADO pelo usuário')
+    return { success: true }
+  })
+  ipcMain.handle('snow_automation_resume', async () => {
+    resumeAutomation()
+    markCurrentRun('RETOMADO pelo usuário')
+    return { success: true }
+  })
+  ipcMain.handle('snow_automation_stop', async () => {
+    stopAutomation()
+    markCurrentRun('PARADO pelo usuário')
+    return { success: true }
+  })
+
+  // ─── SNOW Automation — gerenciador de abas abertas ────────────────────────────
+  ipcMain.handle('snow_automation_list_open_tabs', async () => {
+    return listReviewTabs()
+  })
+  ipcMain.handle('snow_automation_close_tab', async (_event, id: string) => {
+    return { success: await closeTab(id) }
+  })
+  ipcMain.handle('snow_automation_close_all_review_tabs', async () => {
+    return { closed: await closeAllReviewTabs() }
+  })
+
+  // ─── SNOW Automation — logs completos em arquivo ──────────────────────────────
+  ipcMain.handle('snow_automation_open_logs_folder', async () => {
+    await shell.openPath(getLogsDir())
+    return { success: true }
+  })
+
+  // ─── SNOW Automation — configuração por parque (líder/técnicos/PO) ───────────
+  ipcMain.handle('snow_windfarm_config_list', async () => {
+    return listWindfarmConfigs()
+  })
+  ipcMain.handle('snow_windfarm_config_save', async (_event, config: Parameters<typeof saveWindfarmConfig>[0]) => {
+    return saveWindfarmConfig(config)
+  })
+  ipcMain.handle('snow_windfarm_config_delete', async (_event, windfarm: string) => {
+    return deleteWindfarmConfig(windfarm)
+  })
 
   // ─── SNOW Automation — Completa (Fase 0 + Módulo 24 numa passada só) ──────────
   ipcMain.handle(
@@ -541,12 +608,21 @@ app.whenReady().then(() => {
       technician: string,
       options: Parameters<typeof runFullAutomation>[4]
     ) => {
-      return runFullAutomation(controlXlsxPath, wtgRootFolder, portalOrigin, technician, options, (msg: string) => {
+      const { log, logger } = wrapWithRunLogger('snow_completa', (msg: string) => {
         event.sender.send('snow_automation_log', { msg })
       })
+      setCurrentRunLogger(logger)
+      try {
+        return await runFullAutomation(controlXlsxPath, wtgRootFolder, portalOrigin, technician, options, log)
+      } finally {
+        logger.close()
+        setCurrentRunLogger(null)
+      }
     }
   )
 
+
+  startTabSweep()
 
   createWindow()
 
@@ -556,6 +632,10 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // Marca no arquivo de log da execução em andamento (se houver) que o
+  // programa foi fechado com uma automação rodando — pedido do usuário, pra
+  // não ficar tentando adivinhar pela última linha normal do arquivo.
+  markCurrentRun('FECHADO pelo usuário (programa encerrado)')
   if (process.platform !== 'darwin') {
     app.quit()
   }
