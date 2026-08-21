@@ -2258,3 +2258,27 @@ automação de novo pra uma turbina cujo Inspection Report já existia
 confere a lista de anexos já existente na tela (mesmo texto de rótulo
 achado no diagnóstico real, "Daily Activity Report") ANTES de gerar ou
 subir qualquer coisa — se já estiver lá, só loga e pula.
+
+## Fix de verdade #3: células novas saíam travadas (sem estilo = sem desbloqueio)
+
+Usuário mandou um exemplo gerado (v1.20.0) e reportou: "não parecem
+texto, as células sumiram e fica um texto que não pode ser editado".
+
+**Causa raiz confirmada** (não foi chute — verificado no XML de
+estilos do molde): a aba "Activities" tem PROTEÇÃO DE FOLHA ativa
+(`ws.protection.sheet == True`). As colunas de entrada de dado de
+verdade (A, B, D, E, J, K, L) têm estilos com `<protection
+locked="0"/>` explícito — são as ÚNICAS células que ficam editáveis
+com a proteção ligada. As novas células que a automação inseria não
+tinham NENHUM atributo `s=` (estilo), o que no XML significa estilo
+índice 0 — que NÃO tem esse desbloqueio. Com a proteção ativa, essa
+célula sem desbloqueio explícito fica travada — exatamente "texto que
+não pode ser editado".
+
+**Fix**: cada célula inserida agora leva o índice de estilo PADRÃO da
+própria coluna (lido de `<cols>` no XML do molde: A=24, B=2, D/E/J/K=
+26 — os mesmos que uma célula digitada à mão nessa coluna receberia).
+Confirmado com openpyxl depois do fix: `ws.protection.sheet == True`
+e todas as 7 células novas (`A5,B5,D5,E5,J5,K5,L5`) com
+`cell.protection.locked == False` — igual às células de entrada de
+verdade.

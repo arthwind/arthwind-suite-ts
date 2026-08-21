@@ -1001,14 +1001,22 @@ async function generateDailyActivityReport(
         throw new Error(`Âncora da linha ${row} não encontrada no molde — a estrutura pode ter mudado (avise antes de usar um molde novo).`)
       }
 
-      const cellStr = (ref: string, text: string) => `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`
+      // Estilo de cada célula tem que ser o índice de estilo PADRÃO da coluna
+      // (visto em <cols> no XML do molde: A=24, B=2, D/E/J/K=26) — nunca
+      // deixar sem `s=` (índice 0 implícito). Achado real: sem isso a célula
+      // fica com o estilo padrão da planilha, que NÃO tem
+      // `<protection locked="0"/>` como as colunas de entrada de dado têm —
+      // com a proteção de folha ativa no molde, isso trava a célula (aparece
+      // como texto fixo, não editável, exatamente o que o usuário reportou).
+      const cellStr = (ref: string, text: string, styleIdx: number) =>
+        `<c r="${ref}" s="${styleIdx}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`
       const newCells =
-        cellStr(`A${row}`, inspectionDate) +
-        cellStr(`B${row}`, serial) +
-        cellStr(`D${row}`, DAILY_REPORT_LEADER) +
-        cellStr(`E${row}`, technician) +
-        cellStr(`J${row}`, 'Inspection Internal') +
-        cellStr(`K${row}`, `Blade ${i + 1} Completed`)
+        cellStr(`A${row}`, inspectionDate, 24) +
+        cellStr(`B${row}`, serial, 2) +
+        cellStr(`D${row}`, DAILY_REPORT_LEADER, 26) +
+        cellStr(`E${row}`, technician, 26) +
+        cellStr(`J${row}`, 'Inspection Internal', 26) +
+        cellStr(`K${row}`, `Blade ${i + 1} Completed`, 26)
       const replacement = `${newCells}<c r="L${row}" s="2"><v>1.5</v></c>`
 
       xml = xml.replace(anchor, replacement)
