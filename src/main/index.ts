@@ -65,17 +65,7 @@ import { pauseAutomation, resumeAutomation, stopAutomation, resetAutomationContr
 import { listReviewTabs, closeTab, closeAllReviewTabs, startTabSweep } from './services/tabRegistry'
 import { getLogsDir, wrapWithRunLogger, setCurrentRunLogger, markCurrentRun } from './services/runLogger'
 import { listWindfarmConfigs, saveWindfarmConfig, deleteWindfarmConfig } from './services/windfarmConfig'
-
-
-// Configuration Helpers
-function getConfigPath(): string {
-  const appData = process.env.APPDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config'))
-  const folder = path.join(appData, "ArthwindSuite")
-  if (!fs.existsSync(folder)) {
-    fs.mkdirSync(folder, { recursive: true })
-  }
-  return path.join(folder, "config.json")
-}
+import { getDebugMode, setDebugMode, getThemeMode, setThemeMode, getLastPaths, setLastPaths } from './services/appConfig'
 
 function createWindow(): void {
   // Create the browser window.
@@ -119,25 +109,12 @@ app.whenReady().then(() => {
 
   // ─── Preference Config IPC Handlers ──────────────────────────────────────────
   ipcMain.handle('get_debug_mode', () => {
-    const p = getConfigPath()
-    if (fs.existsSync(p)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(p, 'utf-8'))
-        return !!data.debug
-      } catch {}
-    }
-    return false
+    return getDebugMode()
   })
 
   ipcMain.handle('set_debug_mode', (_event, enabled: boolean) => {
-    const p = getConfigPath()
     try {
-      let cfg: any = {}
-      if (fs.existsSync(p)) {
-        cfg = JSON.parse(fs.readFileSync(p, 'utf-8'))
-      }
-      cfg.debug = enabled
-      fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8')
+      setDebugMode(enabled)
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -145,25 +122,12 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('get_theme_mode', () => {
-    const p = getConfigPath()
-    if (fs.existsSync(p)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(p, 'utf-8'))
-        return data.theme || "light"
-      } catch {}
-    }
-    return "light"
+    return getThemeMode()
   })
 
   ipcMain.handle('set_theme_mode', (_event, mode: string) => {
-    const p = getConfigPath()
     try {
-      let cfg: any = {}
-      if (fs.existsSync(p)) {
-        cfg = JSON.parse(fs.readFileSync(p, 'utf-8'))
-      }
-      cfg.theme = mode
-      fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8')
+      setThemeMode(mode)
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -171,25 +135,12 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('get_last_paths', () => {
-    const p = getConfigPath()
-    if (fs.existsSync(p)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(p, 'utf-8'))
-        return data.lastPaths || {}
-      } catch {}
-    }
-    return {}
+    return getLastPaths()
   })
 
   ipcMain.handle('set_last_paths', (_event, paths: any) => {
-    const p = getConfigPath()
     try {
-      let cfg: any = {}
-      if (fs.existsSync(p)) {
-        cfg = JSON.parse(fs.readFileSync(p, 'utf-8'))
-      }
-      cfg.lastPaths = paths
-      fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8')
+      setLastPaths(paths)
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
