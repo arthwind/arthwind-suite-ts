@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Icons } from '../constants/icons.jsx';
 import { docContent } from '../constants/translations.js';
 import GpsSelector from './GpsSelector.jsx';
@@ -12,6 +12,24 @@ import ReconstruirModule from './ReconstruirModule.jsx';
 import ArthnexUploaderModule from './ArthnexUploaderModule.jsx';
 import SnowModule from './SnowModule.jsx';
 import SnowAutomationModule from './SnowAutomationModule.jsx';
+
+// Módulos autônomos (arquivo próprio, estado interno grande — fila, log,
+// automações demoradas) que NÃO podem ser desmontados ao trocar de aba, senão
+// perdem tudo (relatado pelo usuário: saiu da Automação SNOW rodando, voltou e
+// não tinha mais como pausar/parar, mesmo o log continuando a rodar). Cada um
+// só é montado na primeira vez que a aba é aberta ("visited"), e depois disso
+// fica sempre montado — só escondido com `display:none` quando não é a aba
+// ativa. `display:'contents'` quando ativo pra não interferir no layout do
+// módulo (ele se comporta como se fosse filho direto de `.module-form`, igual
+// já era antes dessa mudança).
+const KEEP_ALIVE_MODULES = {
+  19: (props) => <ArthnexUploaderModule T={props.T} D={props.D} />,
+  17: (props) => <WorkflowModule T={props.T} D={props.D} isPyWebView={props.isPyWebView} onOpenFolder={props.onOpenFolder} />,
+  16: (props) => <HorizonModule D={props.D} isPyWebView={props.isPyWebView} onOpenFolder={props.onOpenFolder} />,
+  11: (props) => <ReconstruirModule D={props.D} isPyWebView={props.isPyWebView} onOpenFolder={props.onOpenFolder} />,
+  23: (props) => <SnowModule D={props.D} />,
+  24: (props) => <SnowAutomationModule D={props.D} />,
+};
 
 export default function ModuleForm({
   T, D, lang, active, module,
@@ -27,6 +45,16 @@ export default function ModuleForm({
   isPyWebView,
 }) {
   const [expandedDoc, setExpandedDoc] = useState(0);
+
+  // Abas de módulo autônomo já visitadas nessa sessão — cada uma monta na
+  // primeira vez e nunca mais desmonta (só fica escondida), pra não perder o
+  // estado interno ao trocar de aba.
+  const [visitedKeepAlive, setVisitedKeepAlive] = useState(() => (KEEP_ALIVE_MODULES[active] ? [active] : []));
+  useEffect(() => {
+    if (KEEP_ALIVE_MODULES[active] && !visitedKeepAlive.includes(active)) {
+      setVisitedKeepAlive((prev) => [...prev, active]);
+    }
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Verifica se todos os inputs obrigatórios estão preenchidos
   const allInputsFilled = module.inputs?.every(inp => !!filePaths[inp.inputId]) ?? true;
@@ -57,19 +85,14 @@ export default function ModuleForm({
 
   return (
     <div className={`module-form${isWideModule ? " wide" : ""}`}>
-      {active === 19 ? (
-        <ArthnexUploaderModule T={T} D={D} />
-      ) : active === 17 ? (
-        <WorkflowModule T={T} D={D} isPyWebView={isPyWebView} onOpenFolder={onOpenFolder} />
-      ) : active === 16 ? (
-        <HorizonModule D={D} isPyWebView={isPyWebView} onOpenFolder={onOpenFolder} />
-      ) : active === 11 ? (
-        <ReconstruirModule D={D} isPyWebView={isPyWebView} onOpenFolder={onOpenFolder} />
-      ) : active === 23 ? (
-        <SnowModule D={D} />
-      ) : active === 24 ? (
-        <SnowAutomationModule D={D} />
-      ) : module.doc ? (
+      {/* Módulos autônomos: montados uma vez (primeira visita) e nunca mais
+          desmontados — só escondidos com display:none quando não ativos. */}
+      {visitedKeepAlive.map((id) => (
+        <div key={id} style={{ display: active === id ? 'contents' : 'none' }}>
+          {KEEP_ALIVE_MODULES[id]({ T, D, isPyWebView, onOpenFolder })}
+        </div>
+      ))}
+      {KEEP_ALIVE_MODULES[active] ? null : module.doc ? (
         <div style={{ paddingBottom: "20px" }}>
           {docContent[lang].map((d, i) => {
             const isExpanded = expandedDoc === i;
