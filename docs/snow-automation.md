@@ -2282,3 +2282,13 @@ Confirmado com openpyxl depois do fix: `ws.protection.sheet == True`
 e todas as 7 células novas (`A5,B5,D5,E5,J5,K5,L5`) com
 `cell.protection.locked == False` — igual às células de entrada de
 verdade.
+
+## Feature: coluna "Blade Position (Pitch #)" preenchida (Pitch 1/2/3 = Blade A/B/C)
+
+Usuário confirmou o layout (célula desbloqueada, editável) e pediu a
+última coluna que faltava: "Blade Position", igual ao pedido original
+— "casar a linha de Pitch 1, Pitch 2 e Pitch 3 com Blade A, Blade B e
+Blade C igual está no formulário". Coluna C agora recebe "Pitch 1"/
+"Pitch 2"/"Pitch 3" na mesma ordem das linhas (Blade A/B/C), com o
+estilo padrão da coluna (índice 2, mesmo de B) pra continuar
+desbloqueada. Confirmado com openpyxl no exemplo gerado.

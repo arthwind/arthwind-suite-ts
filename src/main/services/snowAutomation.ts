@@ -995,14 +995,14 @@ async function generateDailyActivityReport(
       // Âncora conhecida do molde oficial: nas linhas 5-7, a célula L (Working
       // Time) já existe vazia ("<c r="L5" s="2"/>") — colunas A-K não existem
       // ainda (linha em branco de verdade). Insere as novas células ANTES dela
-      // (ordem de coluna certa: A,B,D,E,J,K,L) e dá valor pra própria L.
+      // (ordem de coluna certa: A,B,C,D,E,J,K,L) e dá valor pra própria L.
       const anchor = `<c r="L${row}" s="2"/>`
       if (!xml.includes(anchor)) {
         throw new Error(`Âncora da linha ${row} não encontrada no molde — a estrutura pode ter mudado (avise antes de usar um molde novo).`)
       }
 
       // Estilo de cada célula tem que ser o índice de estilo PADRÃO da coluna
-      // (visto em <cols> no XML do molde: A=24, B=2, D/E/J/K=26) — nunca
+      // (visto em <cols> no XML do molde: A=24, B/C=2, D/E/J/K=26) — nunca
       // deixar sem `s=` (índice 0 implícito). Achado real: sem isso a célula
       // fica com o estilo padrão da planilha, que NÃO tem
       // `<protection locked="0"/>` como as colunas de entrada de dado têm —
@@ -1010,9 +1010,13 @@ async function generateDailyActivityReport(
       // como texto fixo, não editável, exatamente o que o usuário reportou).
       const cellStr = (ref: string, text: string, styleIdx: number) =>
         `<c r="${ref}" s="${styleIdx}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`
+      // Coluna C ("Blade Position (Pitch #)") — pedido do usuário: casa a
+      // ordem das 3 linhas com Pitch 1/2/3 = Blade A/B/C, igual já é usado no
+      // resto do Inspection Report.
       const newCells =
         cellStr(`A${row}`, inspectionDate, 24) +
         cellStr(`B${row}`, serial, 2) +
+        cellStr(`C${row}`, `Pitch ${i + 1}`, 2) +
         cellStr(`D${row}`, DAILY_REPORT_LEADER, 26) +
         cellStr(`E${row}`, technician, 26) +
         cellStr(`J${row}`, 'Inspection Internal', 26) +
