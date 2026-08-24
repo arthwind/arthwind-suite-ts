@@ -2401,6 +2401,13 @@ export interface RunAutomationOptions {
   // em nada. Só reporta o que falta (ver `RunAutomationResult.missingDefects` /
   // `missingBlanks` / `missingVideos` e o log detalhado linha a linha). Padrão: false.
   dryRun?: boolean
+  // Modo Flawless: agrupa defeito+blank+vídeo por PÁ e só avança pra próxima
+  // quando a atual estiver 100% preenchida/submetida — pá com pendência volta
+  // pro final da fila (até 3 vezes) em vez de seguir com furo. Mais lento que o
+  // modo clássico de 3 rodadas, pensado pra fila overnight sem ninguém pra reagir
+  // a uma pendência no meio da noite (ver Modo Flawless em `runSnowDamageAutomation`).
+  // Padrão: false (mantém o modo clássico de rodadas).
+  flawlessMode?: boolean
 }
 
 export interface LiveAuditResult {
@@ -3633,6 +3640,292 @@ export async function runSnowDamageAutomation(
       return { row, formPage, filler, expectedFilename, prefix }
     }
 
+    // Aba reaproveitada em modo Submissão Automática — compartilhada entre o modo
+    // clássico (rodadas) e o Modo Flawless (ambos chamam `fillAndSubmitDefectRowOnce`
+    // pra preencher/submeter UMA linha por vez; só a estratégia de repetição em volta
+    // dela muda entre os dois modos).
+    let sharedAutoSubmitPage: Page | null = null
+
+    // Preenche (e, em Submissão Automática, submete) UMA linha de defeito/blank —
+    // extraído do corpo que antes vivia só dentro do loop de rodadas clássico, pra
+    // o Modo Flawless poder reusar exatamente a mesma lógica de preenchimento sem
+    // duplicar (e sem arriscar os dois modos divergindo com o tempo).
+    async function fillAndSubmitDefectRowOnce(
+      row: DamageReportRow,
+      prefix: string
+    ): Promise<'ok' | 'skip' | { error: string }> {
+      // Fora do try pra ficar acessível no catch — precisa disso pra poder fechar a
+      // aba se der erro (bug de dropdown travado do SNOW, ver comentário abaixo).
+      let formPage: Page | null = null
+      try {
+        let context: BrowserContext
+        try {
+          context = await getContext(options.headless ?? false)
+        } catch {
+          await closeServiceNowSession()
+          context = await getContext(options.headless ?? false)
+        }
+
+        let targetPage: Page
+        if (autoSubmit) {
+          if (!sharedAutoSubmitPage || sharedAutoSubmitPage.isClosed()) {
+            sharedAutoSubmitPage = await context.newPage()
+            registerTab(sharedAutoSubmitPage, { purpose: 'transient', label: 'defeitos (auto)' })
+          }
+          targetPage = sharedAutoSubmitPage
+        } else {
+          // No modo de conferência manual: abre uma NOVA ABA exclusiva no Chrome para cada linha
+          targetPage = await context.newPage()
+          registerTab(targetPage, {
+            purpose: 'defect-review',
+            blade: row.bladeSerialNumber,
+            label: `${row.subComponent} | ${row.failureType}`
+          })
+        }
+
+        await targetPage.bringToFront().catch(() => {})
+
+        // Compara a URL INTEIRA (com query), não só o caminho antes do "?" — ver
+        // comentário original sobre o bug de aba reaproveitada "parecendo" já
+        // estar no lugar certo.
+        if (targetPage.url() !== incidentUrl) {
+          await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+        }
+
+        const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
+        if (existsInSnow) {
+          log(`  ℹ [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
+          if (!autoSubmit && context.pages().length > 1) {
+            await targetPage.close().catch(() => {})
+          }
+          return 'skip'
+        }
+
+        formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
+        if (!formPage) {
+          throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
+        }
+
+        let localPhotos = options.localPhotosDir
+          ? findLocalPhotosFromMap(photosMap, row)
+          : []
+        if (localPhotos.length === 0 && options.localPhotosDir) {
+          localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
+        }
+
+        const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
+        await filler.fill(row, localPhotos, autoSubmit)
+
+        log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
+
+        if (autoSubmit) {
+          await formPage.waitForTimeout(2000)
+          const scopes = [formPage, ...formPage.frames()]
+          let canSeeCreateBtn = false
+          for (const s of scopes) {
+            const hasBtn = await s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada/i }).isVisible({ timeout: 500 }).catch(() => false)
+            if (hasBtn) {
+              canSeeCreateBtn = true
+              break
+            }
+          }
+          if (!canSeeCreateBtn) {
+            await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          }
+        } else {
+          log(`  ℹ Formulário mantido aberto na tela para revisão. Avançando para a próxima linha...`)
+        }
+
+        return 'ok'
+      } catch (err: any) {
+        // Bug conhecido do ServiceNow (ver comentário original): dropdown pode travar
+        // pra sempre naquela aba — descarta a aba reaproveitada de Submissão
+        // Automática pra próxima linha abrir uma do zero, "resetando" o problema.
+        // Abre uma aba em branco ANTES de fechar a travada, pra nunca ficar com
+        // zero abas abertas no contexto (pode derrubar a janela inteira).
+        if (autoSubmit && formPage) {
+          try {
+            const c = await getContext(options.headless ?? false)
+            await c.newPage().catch(() => {})
+          } catch {
+            /* se nem isso der certo, o próximo getContext() já reabre a sessão inteira */
+          }
+          await formPage.close().catch(() => {})
+          sharedAutoSubmitPage = null
+          log(`  ℹ Aba descartada por causa da falha — a próxima linha abre uma aba nova.`)
+        }
+        return { error: err.message }
+      }
+    }
+
+    // ─── Modo Flawless: só avança de pá quando ela estiver 100% completa ───
+    // Pedido do usuário: o modo clássico (rodadas) evita bastante erro, mas ainda
+    // deixa escapar defeito/vídeo pontual, e a automação segue pro Inspection
+    // Report da turbina mesmo com pendência. No Flawless, os itens (defeito+blank+
+    // vídeo) são agrupados por PÁ; cada pá tenta até 10 vezes por passada, e se
+    // sobrar pendência ela volta pro FINAL da fila (outras pás já podem ter
+    // resolvido o problema transitório do SNOW até a vez dela vir de novo) — até
+    // 3 voltas (30 tentativas no total). Só desiste de vez (e reporta, sem pular
+    // silenciosamente) se ainda sobrar algo depois disso — mais lento, mas pensado
+    // pra fila overnight sem ninguém pra reagir a uma pausa no meio da noite.
+    if (options.flawlessMode) {
+      type BladeGroup = { blade: string; defectBlankRows: DamageReportRow[]; videoRows: DamageReportRow[] }
+
+      const bladeOrder: string[] = []
+      const bladeGroupsMap = new Map<string, BladeGroup>()
+      for (const r of rows) {
+        const b = r.bladeSerialNumber
+        if (!bladeGroupsMap.has(b)) {
+          bladeGroupsMap.set(b, { blade: b, defectBlankRows: [], videoRows: [] })
+          bladeOrder.push(b)
+        }
+        const g = bladeGroupsMap.get(b)!
+        if (isVideoRow(r)) g.videoRows.push(r)
+        else g.defectBlankRows.push(r)
+      }
+
+      const MAX_ATTEMPTS_PER_PASS = 10
+      const MAX_RECYCLES = 3
+      const totalBlades = bladeOrder.length
+      let queue: BladeGroup[] = bladeOrder.map((b) => bladeGroupsMap.get(b)!)
+      const recycleCount = new Map<string, number>()
+      let bladesConcluded = 0
+
+      log(`🪶 [Flawless] ${totalBlades} pá(s) na fila — só avança pra próxima quando a atual estiver 100% completa (até ${MAX_RECYCLES} voltas na fila por pá).`)
+
+      while (queue.length > 0) {
+        await checkpoint(log)
+        const group = queue.shift()!
+        const recycles = recycleCount.get(group.blade) ?? 0
+        const roundTag = recycles > 0 ? ` (volta ${recycles}/${MAX_RECYCLES})` : ''
+        log(`🪶 [Flawless] Pá ${group.blade}${roundTag} — ${group.defectBlankRows.length} defeito(s)/blank(s) + ${group.videoRows.length} vídeo(s) pendente(s).`)
+
+        // 1) Dispara o vídeo dessa pá primeiro, pra aproveitar o tempo de upload
+        // durante o preenchimento dos defeitos dela (mesma ideia da Fase 0/1
+        // clássica, só que por pá em vez de pra turbina inteira).
+        let openVideoTabs: OpenVideoTab[] = []
+        for (let vi = 0; vi < group.videoRows.length; vi++) {
+          await checkpoint(log)
+          const row = group.videoRows[vi]
+          const prefix = `[Flawless ${group.blade} Vídeo ${vi + 1}/${group.videoRows.length}]`
+          try {
+            const result = await fillVideoTab(row, prefix)
+            if (result !== 'skip') openVideoTabs.push(result)
+          } catch (err: any) {
+            log(`  ✗ ${prefix} FALHOU ao preencher vídeo: ${err.message}`)
+          }
+        }
+
+        // 2) Preenche defeitos/blanks dessa pá — até MAX_ATTEMPTS_PER_PASS tentativas
+        // por item ainda pendente NESSA passada.
+        let pendingDefects = group.defectBlankRows
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PASS && pendingDefects.length > 0; attempt++) {
+          if (attempt > 1) {
+            log(`  🔁 [Flawless ${group.blade}] Tentativa ${attempt}/${MAX_ATTEMPTS_PER_PASS} — ${pendingDefects.length} item(ns) ainda pendente(s)...`)
+          }
+          const stillFailing: DamageReportRow[] = []
+          for (let i = 0; i < pendingDefects.length; i++) {
+            await checkpoint(log)
+            const row = pendingDefects[i]
+            const prefix = `[Flawless ${group.blade}${attempt > 1 ? ` T${attempt}` : ''} ${i + 1}/${pendingDefects.length}]`
+            const outcome = await fillAndSubmitDefectRowOnce(row, prefix)
+            if (outcome === 'ok') {
+              processed++
+            } else if (outcome !== 'skip') {
+              stillFailing.push(row)
+            }
+          }
+          pendingDefects = stillFailing
+        }
+
+        // 3) Confere (e, em Submissão Automática, submete) os vídeos disparados —
+        // em Conferência Manual o vídeo nunca é auto-submetido (fica pra revisão
+        // humana), então "preenchido" já conta como concluído pra fins de fechar a pá.
+        let pendingVideoRows: DamageReportRow[] = []
+        if (autoSubmit) {
+          let tabsToCheck = openVideoTabs
+          for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PASS && tabsToCheck.length > 0; attempt++) {
+            const stillFailing: OpenVideoTab[] = []
+            for (const tab of tabsToCheck) {
+              if (!tab.expectedFilename) {
+                pendingVideoRows.push(tab.row)
+                continue
+              }
+              const confirmed = await verifyVideoAttached(tab.formPage, tab.expectedFilename, log)
+              if (!confirmed) {
+                await tab.formPage.close().catch(() => {})
+                stillFailing.push(tab)
+                continue
+              }
+              try {
+                await tab.filler.submitAndReadEntry()
+                videosFilled++
+                await tab.formPage.close().catch(() => {})
+              } catch {
+                stillFailing.push(tab)
+              }
+            }
+            if (stillFailing.length === 0) break
+            if (attempt === MAX_ATTEMPTS_PER_PASS) {
+              for (const t of stillFailing) pendingVideoRows.push(t.row)
+              break
+            }
+            const reopened: OpenVideoTab[] = []
+            for (const t of stillFailing) {
+              try {
+                const result = await fillVideoTab(t.row, t.prefix)
+                if (result !== 'skip') reopened.push(result)
+              } catch {
+                pendingVideoRows.push(t.row)
+              }
+            }
+            tabsToCheck = reopened
+          }
+        } else {
+          videosFilled += openVideoTabs.length
+        }
+
+        const stillPending = pendingDefects.length > 0 || pendingVideoRows.length > 0
+        if (!stillPending) {
+          bladesConcluded++
+          log(`  ✅ [Flawless] Pá ${group.blade} CONCLUÍDA — tudo preenchido e submetido (${bladesConcluded}/${totalBlades}).`)
+          continue
+        }
+
+        if (recycles >= MAX_RECYCLES) {
+          failed += pendingDefects.length
+          videosFailed += pendingVideoRows.length
+          const missing = [
+            ...pendingDefects.map(
+              (r) =>
+                `✗ [Flawless] Defeito não confirmado após ${MAX_RECYCLES} volta(s) na fila: ${r.bladeSerialNumber} — ${r.failureType} (DF ${r.dfDistanceStart}-${r.dfDistanceEnd})`
+            ),
+            ...pendingVideoRows.map((r) => `✗ [Flawless] Vídeo não confirmado após ${MAX_RECYCLES} volta(s) na fila: ${r.bladeSerialNumber}`)
+          ]
+          errors.push(...missing)
+          log(`  ⛔ [Flawless] Pá ${group.blade} esgotou ${MAX_RECYCLES} voltas na fila com pendência — parando essa turbina e reportando (as próximas turbinas da fila não são afetadas).`)
+          return {
+            success: false,
+            processed,
+            failed,
+            errors,
+            videosFilled,
+            videosFailed,
+            error: `[Flawless] Pá ${group.blade} não completou mesmo após ${MAX_RECYCLES} voltas na fila.`
+          }
+        }
+
+        recycleCount.set(group.blade, recycles + 1)
+        group.defectBlankRows = pendingDefects
+        group.videoRows = pendingVideoRows
+        queue.push(group)
+        log(`  🔁 [Flawless] Pá ${group.blade} volta pro final da fila (volta ${recycles + 1}/${MAX_RECYCLES}) — ${pendingDefects.length} defeito(s)/blank(s) + ${pendingVideoRows.length} vídeo(s) ainda pendente(s).`)
+      }
+
+      log(`✅ [Flawless] Todas as ${totalBlades} pá(s) concluídas — ${processed} defeito(s)/blank(s) ok, ${videosFilled} vídeo(s) ok.`)
+      return { success: true, processed, failed, errors, videosFilled, videosFailed }
+    }
+
     const MAX_VIDEO_ROUNDS = 3
     let videoOpenTabs: OpenVideoTab[] = []
 
@@ -3663,22 +3956,6 @@ export async function runSnowDamageAutomation(
     const MAX_ROUNDS = 3
     let currentRoundRows = nonVideoRows
 
-    // Em modo Submissão Automática, a MESMA aba é reaproveitada entre linhas dessa
-    // turbina (design intencional: preenche, submete, clica "Add Damage Entry" de
-    // novo na mesma aba, sem o custo de abrir uma aba nova a cada defeito). Antes,
-    // "qual aba reaproveitar" era decidido buscando `context.pages().find(p =>
-    // !p.isClosed())` no CONTEXTO INTEIRO — bug real diagnosticado pelo usuário:
-    // as abas de VÍDEO ficam abertas de propósito esperando revisão manual (de
-    // QUALQUER pá/turbina já processada nessa sessão, não só a atual), e essa
-    // busca não distinguia "uma aba livre pra reaproveitar" de "a aba de vídeo de
-    // outra pá esperando o humano revisar" — a próxima linha podia acabar
-    // preenchendo o formulário EM CIMA da aba de vídeo errada, misturando dados de
-    // pás diferentes. Corrigido rastreando a página explicitamente numa variável
-    // local (só dessa turbina, só desse loop) em vez de "adivinhar" no contexto
-    // compartilhado — nunca aponta pra aba de vídeo nenhuma, sempre pra própria
-    // aba que este loop mesmo abriu.
-    let sharedAutoSubmitPage: Page | null = null
-
     for (let round = 1; round <= MAX_ROUNDS && currentRoundRows.length > 0; round++) {
       if (round > 1) {
         log(`🔁 Rodada ${round}/${MAX_ROUNDS} de retentativa — ${currentRoundRows.length} linha(s) que falharam antes...`)
@@ -3693,127 +3970,13 @@ export async function runSnowDamageAutomation(
 
         const row = currentRoundRows[i]
         const prefix = `[${round > 1 ? `R${round} ` : ''}${i + 1}/${currentRoundRows.length}]`
-        // Fora do try pra ficar acessível no catch — precisa disso pra poder fechar a
-        // aba se der erro (ver comentário no catch, bug de dropdown travado do SNOW).
-        let formPage: Page | null = null
-        try {
-        let context: BrowserContext
-        try {
-          context = await getContext(options.headless ?? false)
-        } catch {
-          await closeServiceNowSession()
-          context = await getContext(options.headless ?? false)
+        const outcome = await fillAndSubmitDefectRowOnce(row, prefix)
+        if (outcome === 'ok') {
+          processed++
+        } else if (outcome !== 'skip') {
+          log(`✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${outcome.error}`)
+          failedThisRound.push(row)
         }
-
-        let targetPage: Page
-        if (autoSubmit) {
-          if (!sharedAutoSubmitPage || sharedAutoSubmitPage.isClosed()) {
-            sharedAutoSubmitPage = await context.newPage()
-            registerTab(sharedAutoSubmitPage, { purpose: 'transient', label: 'defeitos (auto)' })
-          }
-          targetPage = sharedAutoSubmitPage
-        } else {
-          // No modo de conferência manual: abre uma NOVA ABA exclusiva no Chrome para cada linha i
-          targetPage = await context.newPage()
-          registerTab(targetPage, {
-            purpose: 'defect-review',
-            blade: row.bladeSerialNumber,
-            label: `${row.subComponent} | ${row.failureType}`
-          })
-        }
-
-        await targetPage.bringToFront().catch(() => {})
-
-        // Compara a URL INTEIRA (com query — é ali que mora o sys_id que distingue
-        // um incidente/turbina do outro), não só o caminho antes do "?". Bug real
-        // achado na fila overnight: comparando só a base (mesma pra qualquer
-        // incidente do ServiceNow), a aba reaproveitada "parecia" já estar no lugar
-        // certo e nunca navegava — preenchia dados em cima da página errada.
-        if (targetPage.url() !== incidentUrl) {
-          await targetPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-        }
-
-        // Checagem ao vivo na tabela Damage Report Entries do ServiceNow
-        const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
-        if (existsInSnow) {
-          log(`  ℹ [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
-          if (!autoSubmit && context.pages().length > 1) {
-            await targetPage.close().catch(() => {})
-          }
-          continue
-        }
-
-        formPage = await openDamageEntryForm(context, targetPage, incidentUrl, log)
-        if (!formPage) {
-          throw new Error("A tela 'Create Damage Entry' não carregou a tempo.")
-        }
-
-        // Cruza a linha atual com o mapa pré-indexado de fotos
-        let localPhotos = options.localPhotosDir
-          ? findLocalPhotosFromMap(photosMap, row)
-          : []
-
-        if (localPhotos.length === 0 && options.localPhotosDir) {
-          localPhotos = findLocalPhotosForDamage(options.localPhotosDir, row)
-        }
-
-        const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
-        await filler.fill(row, localPhotos, autoSubmit)
-
-        processed++
-
-        log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
-
-        if (autoSubmit) {
-          await formPage.waitForTimeout(2000)
-          const scopes = [formPage, ...formPage.frames()]
-          let canSeeCreateBtn = false
-          for (const s of scopes) {
-            const hasBtn = await s.getByRole('button', { name: /create damage entry|add damage entry|nova entrada/i }).isVisible({ timeout: 500 }).catch(() => false)
-            if (hasBtn) {
-              canSeeCreateBtn = true
-              break
-            }
-          }
-
-          if (!canSeeCreateBtn) {
-            await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-          }
-        } else {
-          log(`  ℹ Formulário [${i + 1}/${currentRoundRows.length}] mantido aberto na tela para revisão. Avançando para a próxima linha...`)
-        }
-      } catch (err: any) {
-        const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${err.message}`
-        log(msg)
-        failedThisRound.push(row)
-
-        // Bug conhecido do ServiceNow (relatado pelo usuário): quando duas pessoas
-        // sobem defeitos ao mesmo tempo, os dropdowns às vezes travam mostrando só
-        // "--None--" pra sempre NAQUELA aba/formulário — não é algo que "destrava"
-        // tentando de novo na mesma aba (por isso `selectFromComboBox` já teve
-        // retentativa e mesmo assim falhou). Em modo automático a aba é reaproveitada
-        // entre linhas — sem fazer nada aqui, a próxima linha herdaria a MESMA aba
-        // travada e falharia de novo, e de novo, indefinidamente. Descarta a aba
-        // (fecha) — a checagem `context.pages().find(p => !p.isClosed())` no início
-        // da próxima linha não vai mais achar essa aba fechada, e abre uma nova do
-        // zero, "resetando" o problema (ideia do usuário).
-        //
-        // CUIDADO (apontado pelo usuário): se essa for a ÚNICA aba aberta no contexto,
-        // fechar ela pode derrubar a janela do navegador inteira antes da próxima linha
-        // ter chance de abrir uma nova — dependendo de como o Windows/Chromium tratam
-        // fechar a última aba de uma janela. Por isso abre uma aba nova EM BRANCO
-        // primeiro, e só DEPOIS fecha a travada — nunca fica com zero abas abertas.
-        if (autoSubmit && formPage) {
-          try {
-            const ctx = await getContext(options.headless ?? false)
-            await ctx.newPage().catch(() => {})
-          } catch {
-            /* se nem isso der certo, tenta fechar mesmo assim — o próximo getContext() já tem fallback de reabrir a sessão inteira */
-          }
-          await formPage.close().catch(() => {})
-          log(`  ℹ Aba descartada por causa da falha — a próxima linha abre uma aba nova.`)
-        }
-      }
       } // fim do for de linhas da rodada
 
       if (failedThisRound.length === 0) break // rodada inteira sem falha — não precisa de mais rodadas

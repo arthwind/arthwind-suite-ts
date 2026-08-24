@@ -15,6 +15,10 @@ export default function SnowAutomationModule({ D }) {
   const [headless, setHeadless] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
   const [dryRun, setDryRun] = useState(false);
+  // Modo Flawless: só avança pra próxima pá quando ela estiver 100% preenchida e
+  // submetida (defeito+blank+vídeo) — mais lento que as 3 rodadas padrão, pensado
+  // pra fila overnight sem ninguém pra reagir a uma pendência no meio da noite.
+  const [flawlessMode, setFlawlessMode] = useState(false);
   const [includeDefects, setIncludeDefects] = useState(true);
   const [includeBlanks, setIncludeBlanks] = useState(true);
   const [includeVideos, setIncludeVideos] = useState(true);
@@ -180,7 +184,7 @@ export default function SnowAutomationModule({ D }) {
           // Sem isso, o Módulo 24 nunca recebia autoSubmit/categorias/dryRun —
           // ficava sempre no padrão (autoSubmit=false), mesmo com a caixa
           // marcada na UI, porque esse objeto simplesmente não existia antes.
-          moduleOptions: { autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }
+          moduleOptions: { autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun, flawlessMode }
         }
       );
       if (res.stopped) {
@@ -252,6 +256,7 @@ export default function SnowAutomationModule({ D }) {
     includeBlanks,
     includeVideos,
     dryRun,
+    flawlessMode,
     ...(startRow ? { startRow: parseInt(startRow, 10) } : {}),
     ...(endRow ? { endRow: parseInt(endRow, 10) } : {}),
   });
@@ -360,7 +365,7 @@ export default function SnowAutomationModule({ D }) {
         // marcado (ou não) no momento do "➕ Adicionar à fila", silenciosamente
         // ignorando qualquer mudança feita depois. startRow/endRow continuam vindo
         // do item (esses sim são por turbina).
-        const runOptions = { ...item.options, headless, autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun }
+        const runOptions = { ...item.options, headless, autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun, flawlessMode }
         const res = await window.pywebview.api.snow_automation_run(item.excelPath, item.incidentUrl, runOptions);
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: res.success ? 'done' : 'failed', result: res } : q)));
         if (res.stopped) {
@@ -711,6 +716,22 @@ export default function SnowAutomationModule({ D }) {
         }}>
           <input type="checkbox" checked={autoSubmit} onChange={(e) => setAutoSubmit(e.target.checked)} disabled={busy || dryRun} />
           Submissão Automática (desativado = apenas preenche, você revisa e submete)
+        </label>
+
+        <label style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          fontWeight: 600,
+          color: D.textPrimary,
+          cursor: 'pointer',
+          border: `1.5px solid ${flawlessMode ? accent : D.borderLight}`,
+          borderRadius: '8px',
+          padding: '10px 12px'
+        }}>
+          <input type="checkbox" checked={flawlessMode} onChange={(e) => setFlawlessMode(e.target.checked)} disabled={busy || dryRun} />
+          Modo Flawless (só avança de pá quando tudo — defeito, blank e vídeo — estiver 100% ok; mais lento, ideal pra overnight)
         </label>
 
         <details style={{
