@@ -1169,13 +1169,20 @@ class InspectionReportFiller extends ServiceNowFormFiller {
    * — usa o mesmo texto do rótulo de download achado no diagnóstico real
    * ("Download attachment <nome do arquivo>"). Usuário pediu: sem isso, rodar a
    * automação de novo pra uma turbina cujo Inspection Report já existia subia o
-   * Daily Activity Report DE NOVO toda vez, gerando duplicata. */
+   * Daily Activity Report DE NOVO toda vez, gerando duplicata.
+   *
+   * Bug real achado pelo usuário (falso positivo sistemático): o `.or(getByText(
+   * /daily activity report/i))` batia com QUALQUER texto da tela contendo essas
+   * palavras — inclusive o texto de instrução FIXO que sempre aparece no topo
+   * ("File name should include report number... Example: Daily Activity
+   * Report_IR0066994"), presente mesmo sem nenhum anexo de verdade. Resultado:
+   * a checagem sempre voltava "já está anexado", e o Daily nunca subia de
+   * verdade em turbina nenhuma. Removido o fallback — só o link de anexo real
+   * (aria-label de download, que só existe quando o arquivo está de fato na
+   * lista) conta. */
   async hasDailyActivityReportAttached(): Promise<boolean> {
     const scope = this.getScope()
-    const existing = scope
-      .locator('a[aria-label*="Daily Activity Report" i]')
-      .or(scope.getByText(/daily activity report/i))
-      .first()
+    const existing = scope.locator('a[aria-label*="Daily Activity Report" i]').first()
     return await existing.isVisible({ timeout: 2000 }).catch(() => false)
   }
 
