@@ -3848,7 +3848,16 @@ export async function runSnowDamageAutomation(
             const stillFailing: OpenVideoTab[] = []
             for (const tab of tabsToCheck) {
               if (!tab.expectedFilename) {
-                pendingVideoRows.push(tab.row)
+                // Não achou o arquivo de vídeo local — retentar não resolve (o
+                // arquivo não vai aparecer sozinho numa próxima passada), então NÃO
+                // entra em `pendingVideoRows` (senão a pá nunca fecharia, ficaria
+                // reabrindo aba nova a cada volta pra sempre — bug real visto pelo
+                // usuário: "abriram várias janelas e não carregou nenhum vídeo").
+                // Conta como falha definitiva de vídeo já aqui, igual o modo
+                // clássico sempre fez, e deixa a aba aberta pra revisão manual.
+                videosFailed++
+                errors.push(`✗ [Flawless] Vídeo sem arquivo local encontrado (não retentado): ${tab.row.bladeSerialNumber} — ${tab.prefix}`)
+                log(`  ⚠ ${tab.prefix} Não foi possível identificar o nome do arquivo esperado — deixando aberta pra revisão manual, não vai retentar.`)
                 continue
               }
               const confirmed = await verifyVideoAttached(tab.formPage, tab.expectedFilename, log)
