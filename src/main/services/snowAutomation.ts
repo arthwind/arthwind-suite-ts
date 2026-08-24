@@ -1811,17 +1811,35 @@ export async function runFullAutomation(
       // Daily Activity Report subia DE NOVO toda vez — sem checar se já tinha
       // sido enviado numa rodada anterior. Agora confere a lista de anexos já
       // existente na tela ANTES de gerar/subir nada.
+      // Bug real relatado pelo usuário: quando o Daily falhava (parque não
+      // cadastrado, molde não encontrado, upload que não pegou), só ficava um
+      // aviso perdido no meio do log — nada marcava a turbina como pendente,
+      // então ela contava como "processada" normalmente mesmo faltando o anexo
+      // obrigatório. Agora CONFIRMA de verdade no final (mesma checagem do
+      // início, não só "o upload não jogou erro") e, se ainda faltar, entra em
+      // `turbineExtraPendencies` — juntado com as pendências de defeito/vídeo
+      // logo abaixo, tanto no `.txt` da turbina quanto nos `errors` do resultado.
+      const turbineExtraPendencies: string[] = []
       if (await filler.hasDailyActivityReportAttached()) {
         log(`  ℹ ${prefix} Daily Activity Report já estava anexado — não sobe de novo.`)
       } else {
+        let dailyAttached = false
         const irNumber = await extractDailyReportIrNumber(page, log)
         if (irNumber) {
           const reportPath = await generateDailyActivityReport(data, entry.dataColeta, i, irNumber, log)
           if (reportPath) {
-            await filler.uploadAttachment(reportPath, 'Daily Activity Report')
+            const uploaded = await filler.uploadAttachment(reportPath, 'Daily Activity Report')
+            if (uploaded) {
+              dailyAttached = await filler.hasDailyActivityReportAttached()
+            }
           }
         } else {
           log(`  ⚠ ${prefix} Não achou o número do relatório na tela — Daily Activity Report não foi gerado.`)
+        }
+        if (!dailyAttached) {
+          const msg = `✗ [${entry.wtg}] ${prefix} Daily Activity Report NÃO ficou anexado (ver aviso acima) — turbina fica pendente.`
+          turbineExtraPendencies.push(msg)
+          log(msg)
         }
       }
 
@@ -1859,9 +1877,14 @@ export async function runFullAutomation(
         (m) => log(`  [${entry.wtg}] ${prefix} ${m}`)
       )
 
-      const hasPendency = !moduleResult.success || moduleResult.failed > 0 || (moduleResult.videosFailed ?? 0) > 0
+      const hasPendency =
+        !moduleResult.success || moduleResult.failed > 0 || (moduleResult.videosFailed ?? 0) > 0 || turbineExtraPendencies.length > 0
       if (hasPendency) {
-        const missing = moduleResult.errors.length > 0 ? moduleResult.errors : [moduleResult.error || 'Falha não especificada.']
+        const missing = [
+          ...turbineExtraPendencies,
+          ...(moduleResult.errors.length > 0 ? moduleResult.errors : moduleResult.success ? [] : [moduleResult.error || 'Falha não especificada.'])
+        ]
+        errors.push(...turbineExtraPendencies)
         const reportPath = writeTurbinePendingReport(entry.wtg, entry.incNumber, missing)
         log(`  [${entry.wtg}] ${prefix} 📄 Pendências salvas em: ${reportPath}`)
       }
