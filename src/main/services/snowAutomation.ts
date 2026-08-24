@@ -63,9 +63,19 @@ function profileDir(): string {
 }
 
 let sharedContext: BrowserContext | null = null
+// Verdadeiro assim que o contexto fecha por QUALQUER motivo — fechado
+// explicitamente por `closeServiceNowSession()`, OU o usuário fechando a
+// janela do navegador manualmente até não sobrar nenhuma aba (o processo do
+// Chromium encerra sozinho nesse caso). Bug real relatado pelo usuário: sem
+// isso, `sharedContext` continuava sendo uma referência não-nula pro objeto
+// MORTO, então `getContext()` devolvia ele direto (sem lançar erro nenhum) —
+// só o `.newPage()` alguns passos depois (já fora do try/catch de quem
+// chamou, que só envolve a chamada de `getContext()`) ia estourar de vez,
+// derrubando a automação inteira em vez de relançar o navegador sozinho.
+let sharedContextClosed = true
 
 async function getContext(headless: boolean): Promise<BrowserContext> {
-  if (sharedContext) return sharedContext
+  if (sharedContext && !sharedContextClosed) return sharedContext
   sharedContext = await chromium.launchPersistentContext(profileDir(), {
     headless,
     // 1920x991, não 1920x1080 — medido de verdade abrindo um Chromium maximizado
@@ -74,6 +84,10 @@ async function getContext(headless: boolean): Promise<BrowserContext> {
     // do próprio navegador. Usar 1920x1080 deixava sobrando espaço em branco embaixo
     // (a página "sobrava" da janela de verdade).
     viewport: { width: 1920, height: 991 }
+  })
+  sharedContextClosed = false
+  sharedContext.on('close', () => {
+    sharedContextClosed = true
   })
   return sharedContext
 }
@@ -98,6 +112,7 @@ export async function closeServiceNowSession(): Promise<{ success: boolean }> {
   if (sharedContext) {
     await sharedContext.close().catch(() => {})
     sharedContext = null
+    sharedContextClosed = true
   }
   return { success: true }
 }
@@ -3478,6 +3493,19 @@ export async function runSnowDamageAutomation(
     }
 
     const { auditSet, blankImageCount } = await auditLiveDamageEntries(auditPage, log, !includeVideos)
+
+    // Fecha a aba de auditoria assim que os dados dela já foram extraídos (só
+    // `auditSet`/`blankImageCount` importam daqui pra frente, não a aba em si).
+    // Bug real relatado pelo usuário: sem isso, toda turbina — mesmo uma que já
+    // estivesse 100% completa, sem nada pra preencher — deixava essa aba aberta
+    // pra sempre; numa fila de dezenas de turbinas isso sozinho acumulava dezenas
+    // de abas e RAM, levando o usuário a fechar manualmente e desestabilizar a
+    // sessão. Só não fecha se for a ÚNICA aba do contexto (mesmo cuidado de
+    // sempre em outros pontos do arquivo — fechar a última aba pode derrubar a
+    // janela/sessão inteira do navegador).
+    if (auditContext.pages().length > 1) {
+      await auditPage.close().catch(() => {})
+    }
 
     // Filtra ANTES de começar (era aqui que o resultado da auditoria era descartado —
     // a mensagem de log rodava, mas nada era de fato usado pra pular linha nenhuma).
