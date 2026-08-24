@@ -25,6 +25,7 @@ import { getBladesForTurbine } from './bladeSets'
 import { getWindfarmConfig } from './windfarmConfig'
 import { checkpoint, AutomationStoppedError } from './automationControl'
 import { registerTab } from './tabRegistry'
+import { writeTurbinePendingReport } from './runLogger'
 
 export interface DamageReportRow {
   bladeSerialNumber: string // serial completo (13 dígitos) — bate com o combobox
@@ -1840,22 +1841,30 @@ export async function runFullAutomation(
           headless: options.headless,
           ...(folder.photosDir ? { localPhotosDir: folder.photosDir } : {})
         },
-        (m) => log(`  ${prefix} ${m}`)
+        (m) => log(`  [${entry.wtg}] ${prefix} ${m}`)
       )
+
+      const hasPendency = !moduleResult.success || moduleResult.failed > 0 || (moduleResult.videosFailed ?? 0) > 0
+      if (hasPendency) {
+        const missing = moduleResult.errors.length > 0 ? moduleResult.errors : [moduleResult.error || 'Falha não especificada.']
+        const reportPath = writeTurbinePendingReport(entry.wtg, entry.incNumber, missing)
+        log(`  [${entry.wtg}] ${prefix} 📄 Pendências salvas em: ${reportPath}`)
+      }
 
       if (moduleResult.success) {
         processed++
-        log(`✓ ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.processed} defeito(s) ok, ${moduleResult.failed} falha(s).`)
+        log(`✓ [${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.processed} defeito(s) ok, ${moduleResult.failed} falha(s).`)
       } else {
         failed++
-        const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.error}`
+        const msg = `✗ [${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.error}`
         errors.push(msg)
         log(msg)
       }
     } catch (err: any) {
       failed++
-      const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}): ${err.message}`
+      const msg = `✗ [${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${err.message}`
       errors.push(msg)
+      writeTurbinePendingReport(entry.wtg, entry.incNumber, [err.message])
       log(msg)
       await page.close().catch(() => {})
     }

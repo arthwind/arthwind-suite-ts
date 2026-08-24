@@ -20,6 +20,37 @@ export function getLogsDir(): string {
   return logsDir()
 }
 
+function pendenciasDir(): string {
+  const appdata = process.env.APPDATA
+  const dir = appdata
+    ? path.join(appdata, 'ArthwindSuite', 'pendencias')
+    : path.join(os.tmpdir(), 'ArthwindSuite', 'pendencias')
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/** Sanitiza pra nome de arquivo seguro no Windows — WTG/INC não costumam ter
+ * caracteres problemáticos, mas isso evita quebrar se algum tiver. */
+function sanitizeForFilename(s: string): string {
+  return s.replace(/[\\/:*?"<>|]/g, '_').trim()
+}
+
+/** Gera (ou sobrescreve) um .txt com as pendências de uma turbina que terminou
+ * com algo faltando — defeitos e vídeos que não foram confirmados/submetidos —
+ * pra facilitar subir manualmente sem precisar vasculhar o log inteiro em
+ * busca do que faltou. Sobrescreve a cada rodada: o arquivo reflete sempre o
+ * estado mais recente daquela turbina, não um histórico acumulado. */
+export function writeTurbinePendingReport(wtg: string, incNumber: string, missing: string[]): string {
+  const filePath = path.join(
+    pendenciasDir(),
+    `${sanitizeForFilename(wtg)} - ${sanitizeForFilename(incNumber)} - pendencias.txt`
+  )
+  const header = `Turbina: ${wtg}\nINC: ${incNumber}\nGerado em: ${new Date().toLocaleString('pt-BR')}\n\nPendências (${missing.length}):\n`
+  const body = missing.map((m) => `- ${m}`).join('\n')
+  fs.writeFileSync(filePath, header + body + '\n', 'utf-8')
+  return filePath
+}
+
 function timestamp(d: Date): string {
   const pad = (n: number, w = 2) => String(n).padStart(w, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
