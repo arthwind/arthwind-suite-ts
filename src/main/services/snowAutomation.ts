@@ -21,7 +21,7 @@ import https from 'https'
 import http from 'http'
 import sharp from 'sharp'
 import { SnowMappings } from './snowProcessor'
-import { getBladesForTurbine } from './bladeSets'
+import { getBladesForTurbine, deriveSetNumberFromSerial } from './bladeSets'
 import { getWindfarmConfig } from './windfarmConfig'
 import { checkpoint, AutomationStoppedError } from './automationControl'
 import { registerTab } from './tabRegistry'
@@ -1925,6 +1925,22 @@ export async function runFullAutomation(
 // E DF Start | F DF End | G PD Start | H PD End | I Inside/Outside |
 // J Blade section | K Blade sub-section | L Blade area | M Size | N Link das fotos
 
+/** Corrige o "Set XXXX" da Damage Description NA HORA de ler a planilha, em vez de
+ * confiar cegamente no texto que o SNOW Processor já gravou na célula (que fica
+ * "congelado" com o Set de quando o Excel foi gerado — se a pá só foi corrigida no
+ * blade_sets.json DEPOIS, o Excel antigo continua com "Set N/A" pra sempre, mesmo
+ * reprocessando). Bug real relatado pelo usuário: viu "Set N/A" chegar até a tela do
+ * ServiceNow sem nada corrigir isso no meio do caminho. O Set é sempre os 4 últimos
+ * dígitos do Blade Serial Number completo da própria linha (mesma regra de
+ * `deriveSetNumberFromSerial` em bladeSets.ts) — não precisa nem de lookup no
+ * blade_sets.json aqui, o serial da linha já É a fonte de verdade. */
+function correctDamageDescriptionSetNumber(description: string, bladeSerial: string): string {
+  if (!description) return description
+  const derived = deriveSetNumberFromSerial(bladeSerial)
+  if (!derived) return description
+  return description.replace(/(Set\s+)(\S+)/i, (_match, prefix) => `${prefix}${derived}`)
+}
+
 async function readDamageRows(excelPath: string): Promise<{ rows: DamageReportRow[] }> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.readFile(excelPath)
@@ -1975,7 +1991,7 @@ async function readDamageRows(excelPath: string): Promise<{ rows: DamageReportRo
       bladeSerialNumber: bladeSerial,
       subComponent,
       failureType,
-      damageDescription: String(row.getCell(4).value ?? '').trim(),
+      damageDescription: correctDamageDescriptionSetNumber(String(row.getCell(4).value ?? '').trim(), bladeSerial),
       dfDistanceStart: Number(row.getCell(5).value ?? 0),
       dfDistanceEnd: Number(row.getCell(6).value ?? 0),
       profileDepthStart: (row.getCell(7).value as number | string) ?? '',

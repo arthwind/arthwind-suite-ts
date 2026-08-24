@@ -55,7 +55,7 @@ function seedFromResourcesIfMissing(dest: string): void {
  * bate errado ou fica em branco com frequência (achado real: 107 das 208
  * entradas estavam erradas ou vazias) — então em vez de confiar nela,
  * deriva sempre do próprio serial, que é a fonte de verdade. */
-function deriveSetNumberFromSerial(serial: string): string | null {
+export function deriveSetNumberFromSerial(serial: string): string | null {
   const parts = serial.trim().split(/\s+/)
   const last = parts[parts.length - 1]
   return /^\d{4}$/.test(last) ? last : null
