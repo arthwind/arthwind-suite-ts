@@ -6,7 +6,8 @@
  * um formulário, pra nunca deixar nada pela metade.
  */
 
-type LogFn = (msg: string) => void
+type LogType = 'info' | 'success' | 'warning' | 'error'
+type LogFn = (msg: string, type?: LogType) => void
 
 let paused = false
 let stopRequested = false
@@ -68,9 +69,9 @@ export async function checkpoint(log: LogFn): Promise<void> {
   if (stopRequested) throw new AutomationStoppedError()
 
   if (paused) {
-    log('⏸ Pausado — aguardando retomar...')
+    log('Pausado — aguardando retomar...', 'warning')
     await new Promise<void>((resolve) => resumeWaiters.push(resolve))
     if (stopRequested) throw new AutomationStoppedError()
-    log('▶ Retomado.')
+    log('Retomado.', 'success')
   }
 }

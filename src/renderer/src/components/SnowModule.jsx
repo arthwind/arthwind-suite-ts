@@ -2,6 +2,7 @@
 // Módulo do Processador SNOW/NAWP — Converte planilhas de inspeção interna/externa, baixa fotos e desenha polígonos
 
 import { useState, useEffect, useRef } from 'react';
+import { Icons } from '../constants/icons.jsx';
 
 const MAX_LOGS = 500;
 
@@ -86,17 +87,17 @@ export default function SnowModule({ D }) {
         const res = await window.pywebview.api.snow_process_excel(excelPath, outputDir);
         setResult(res);
         if (res.success) {
-          setLogs((prev) => [...prev, { text: '✓ Processamento concluído com sucesso!', type: 'success' }]);
+          setLogs((prev) => [...prev, { text: 'Processamento concluído com sucesso!', type: 'success' }]);
         } else {
-          setLogs((prev) => [...prev, { text: `✗ Falha: ${res.error}`, type: 'error' }]);
+          setLogs((prev) => [...prev, { text: `Falha: ${res.error}`, type: 'error' }]);
         }
       } else {
         const res = await window.pywebview.api.snow_process_excel_batch(excelPaths, outputDir);
         setResult(res);
         if (res.success) {
-          setLogs((prev) => [...prev, { text: '✓ Processamento em lote finalizado!', type: 'success' }]);
+          setLogs((prev) => [...prev, { text: 'Processamento em lote finalizado!', type: 'success' }]);
         } else {
-          setLogs((prev) => [...prev, { text: `✗ Erro no lote: ${res.error}`, type: 'error' }]);
+          setLogs((prev) => [...prev, { text: `Erro no lote: ${res.error}`, type: 'error' }]);
         }
       }
     } catch (err) {
@@ -112,6 +113,14 @@ export default function SnowModule({ D }) {
     if (type === 'error') return D.error;
     if (type === 'warning') return D.warning;
     return D.textSecond;
+  };
+
+  const logIcon = (type) => {
+    const color = logColor(type);
+    if (type === 'success') return Icons.checkCircle(color);
+    if (type === 'error') return Icons.xCircle(color);
+    if (type === 'warning') return Icons.alertTriangle(color);
+    return Icons.info(color);
   };
 
   const accent = '#0284c7'; // Azul do cliente SNOW/NAWP
@@ -180,7 +189,7 @@ export default function SnowModule({ D }) {
                 onClick={!running ? pickSingleFile : undefined}
                 style={{ cursor: running ? 'not-allowed' : 'pointer' }}
               >
-                <span style={{ color: excelPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+                <span style={{ display: 'flex', color: excelPath ? accent : D.textMuted, flexShrink: 0 }}>{Icons.file(excelPath ? accent : D.textMuted)}</span>
                 <span className="input-field-text" title={excelPath || 'Selecione o arquivo .xlsx'}>
                   {excelPath ? excelPath.split('\\').pop() : 'Selecione o arquivo .xlsx'}
                 </span>
@@ -196,7 +205,7 @@ export default function SnowModule({ D }) {
                 onClick={!running ? pickMultipleFiles : undefined}
                 style={{ cursor: running ? 'not-allowed' : 'pointer' }}
               >
-                <span style={{ color: excelPaths.length > 0 ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+                <span style={{ display: 'flex', color: excelPaths.length > 0 ? accent : D.textMuted, flexShrink: 0 }}>{Icons.file(excelPaths.length > 0 ? accent : D.textMuted)}</span>
                 <span className="input-field-text">
                   {excelPaths.length > 0 ? `${excelPaths.length} arquivos selecionados` : 'Selecione os arquivos .xlsx'}
                 </span>
@@ -219,7 +228,7 @@ export default function SnowModule({ D }) {
               onClick={!running ? pickFolder : undefined}
               style={{ cursor: running ? 'not-allowed' : 'pointer' }}
             >
-              <span style={{ color: outputDir ? accent : D.textMuted, flexShrink: 0 }}>📂</span>
+              <span style={{ display: 'flex', color: outputDir ? accent : D.textMuted, flexShrink: 0 }}>{Icons.folderOpen(outputDir ? accent : D.textMuted)}</span>
               <span className="input-field-text" title={outputDir || 'Selecione a pasta de saída'}>
                 {outputDir || 'Selecione a pasta de saída'}
               </span>
@@ -246,7 +255,7 @@ export default function SnowModule({ D }) {
               gap: '6px'
             }}
           >
-            📂 Abrir Pasta de Destino
+            {Icons.opendir(D.textPrimary)} Abrir Pasta de Destino
           </button>
         )}
 
@@ -340,8 +349,9 @@ export default function SnowModule({ D }) {
             </div>
           ) : (
             logs.map((log, idx) => (
-              <div key={idx} style={{ color: logColor(log.type), whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
-                {log.text}
+              <div key={idx} style={{ color: logColor(log.type), whiteSpace: 'pre-wrap', lineHeight: '1.4', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                <span style={{ display: 'flex', flexShrink: 0, marginTop: '2px' }}>{logIcon(log.type)}</span>
+                <span>{log.text}</span>
               </div>
             ))
           )}

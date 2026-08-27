@@ -5,6 +5,7 @@
 // precisa logar de novo a cada execução (só quando a sessão expirar de verdade).
 
 import { useState, useEffect, useRef } from 'react';
+import { Icons } from '../constants/icons.jsx';
 
 const MAX_LOGS = 800;
 
@@ -67,11 +68,10 @@ export default function SnowAutomationModule({ D }) {
 
   useEffect(() => {
     const handleLog = (e) => {
-      const { msg } = e.detail || {};
+      const { msg, type } = e.detail || {};
       if (!msg) return;
-      const type = msg.startsWith('✗') ? 'error' : msg.startsWith('✓') ? 'success' : 'info';
       setLogs((prev) => {
-        const next = [...prev, { text: msg, type }];
+        const next = [...prev, { text: msg, type: type || 'info' }];
         return next.length > MAX_LOGS ? next.slice(-MAX_LOGS) : next;
       });
     };
@@ -167,8 +167,8 @@ export default function SnowAutomationModule({ D }) {
     setRunningFullAutomation(true);
     setLogs((prev) => [...prev, {
       text: mode === 'next'
-        ? '▶ Automação Completa — próxima turbina pendente...'
-        : '▶ Automação Completa — todas as turbinas prontas...',
+        ? 'Automação Completa — próxima turbina pendente...'
+        : 'Automação Completa — todas as turbinas prontas...',
       type: 'info'
     }]);
     try {
@@ -189,16 +189,16 @@ export default function SnowAutomationModule({ D }) {
       );
       if (res.stopped) {
         setLogs((prev) => [...prev, {
-          text: `⏹ Parado pelo usuário: ${res.processed} ok, ${res.failed} falha(s).`,
+          text: `Parado pelo usuário: ${res.processed} ok, ${res.failed} falha(s).`,
           type: 'warning'
         }]);
       } else if (res.success) {
         setLogs((prev) => [...prev, {
-          text: `✓ Automação Completa concluída: ${res.processed} ok, ${res.failed} falha(s), ${res.skippedNoFolder} sem pasta pronta ainda.`,
+          text: `Automação Completa concluída: ${res.processed} ok, ${res.failed} falha(s), ${res.skippedNoFolder} sem pasta pronta ainda.`,
           type: res.failed > 0 ? 'warning' : 'success'
         }]);
       } else {
-        setLogs((prev) => [...prev, { text: `✗ Falha: ${res.error}`, type: 'error' }]);
+        setLogs((prev) => [...prev, { text: `Falha: ${res.error}`, type: 'error' }]);
       }
     } catch (err) {
       setLogs((prev) => [...prev, { text: `Erro crítico: ${err.message || err}`, type: 'error' }]);
@@ -229,11 +229,11 @@ export default function SnowAutomationModule({ D }) {
       const res = await window.pywebview.api.snow_automation_login(incidentUrl.trim());
       if (res.success) {
         setLogs((prev) => [...prev, {
-          text: '✓ Navegador aberto — faça login manualmente na janela. A sessão fica salva pras próximas vezes.',
+          text: 'Navegador aberto — faça login manualmente na janela. A sessão fica salva pras próximas vezes.',
           type: 'success'
         }]);
       } else {
-        setLogs((prev) => [...prev, { text: `✗ Falha ao abrir navegador: ${res.error}`, type: 'error' }]);
+        setLogs((prev) => [...prev, { text: `Falha ao abrir navegador: ${res.error}`, type: 'error' }]);
       }
     } catch (err) {
       setLogs((prev) => [...prev, { text: `Erro crítico: ${err.message || err}`, type: 'error' }]);
@@ -288,22 +288,22 @@ export default function SnowAutomationModule({ D }) {
       const res = await window.pywebview.api.snow_automation_run(excelPath, incidentUrl.trim(), options);
       setResult(res);
       if (res.stopped) {
-        setLogs((prev) => [...prev, { text: `⏹ Parado pelo usuário: ${res.processed} ok, ${res.failed} falha(s).`, type: 'warning' }]);
+        setLogs((prev) => [...prev, { text: `Parado pelo usuário: ${res.processed} ok, ${res.failed} falha(s).`, type: 'warning' }]);
       } else if (res.success && res.dryRun) {
         const total = (res.missingDefects || 0) + (res.missingBlanks || 0) + (res.missingVideos || 0);
         setLogs((prev) => [...prev, {
           text: total === 0
-            ? `✓ Auditoria concluída: nada faltando.`
-            : `⚠ Auditoria concluída: ${total} item(ns) faltando (${res.missingDefects || 0} defeito(s), ${res.missingBlanks || 0} blank(s), ${res.missingVideos || 0} vídeo(s)).`,
+            ? `Auditoria concluída: nada faltando.`
+            : `Auditoria concluída: ${total} item(ns) faltando (${res.missingDefects || 0} defeito(s), ${res.missingBlanks || 0} blank(s), ${res.missingVideos || 0} vídeo(s)).`,
           type: total === 0 ? 'success' : 'warning'
         }]);
       } else if (res.success) {
         setLogs((prev) => [...prev, {
-          text: `✓ Automação concluída: ${res.processed} ok, ${res.failed} falha(s).`,
+          text: `Automação concluída: ${res.processed} ok, ${res.failed} falha(s).`,
           type: res.failed > 0 ? 'warning' : 'success'
         }]);
       } else {
-        setLogs((prev) => [...prev, { text: `✗ Falha: ${res.error}`, type: 'error' }]);
+        setLogs((prev) => [...prev, { text: `Falha: ${res.error}`, type: 'error' }]);
       }
     } catch (err) {
       setLogs((prev) => [...prev, { text: `Erro crítico: ${err.message || err}`, type: 'error' }]);
@@ -326,7 +326,7 @@ export default function SnowAutomationModule({ D }) {
       result: null,
     };
     setQueue((prev) => [...prev, item]);
-    setLogs((prev) => [...prev, { text: `➕ Turbina adicionada à fila: ${item.label} (${item.bladeCount} pá(s)).`, type: 'info' }]);
+    setLogs((prev) => [...prev, { text: `Turbina adicionada à fila: ${item.label} (${item.bladeCount} pá(s)).`, type: 'info' }]);
     resetTurbineForm();
   };
 
@@ -342,7 +342,7 @@ export default function SnowAutomationModule({ D }) {
     setQueueRunning(true);
     setRan(false);
     setResult(null);
-    setLogs((prev) => [...prev, { text: `▶ Iniciando fila overnight com ${queue.length} turbina(s)...`, type: 'info' }]);
+    setLogs((prev) => [...prev, { text: `Iniciando fila overnight com ${queue.length} turbina(s)...`, type: 'info' }]);
 
     // Snapshot dos itens no momento do início — a fila roda sequencialmente, uma
     // turbina de cada vez, começando a próxima só quando a anterior terminar por
@@ -362,42 +362,42 @@ export default function SnowAutomationModule({ D }) {
         // não o snapshot congelado de quando a turbina foi adicionada à fila. Sem
         // isso, marcar "Submeter automaticamente" DEPOIS de já ter montado a fila
         // não tinha efeito nenhum: cada item rodava com o autoSubmit que estava
-        // marcado (ou não) no momento do "➕ Adicionar à fila", silenciosamente
+        // marcado (ou não) no momento do "Adicionar à fila", silenciosamente
         // ignorando qualquer mudança feita depois. startRow/endRow continuam vindo
         // do item (esses sim são por turbina).
         const runOptions = { ...item.options, headless, autoSubmit, includeDefects, includeBlanks, includeVideos, dryRun, flawlessMode }
         const res = await window.pywebview.api.snow_automation_run(item.excelPath, item.incidentUrl, runOptions);
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: res.success ? 'done' : 'failed', result: res } : q)));
         if (res.stopped) {
-          setLogs((prev) => [...prev, { text: `⏹ Fila parada pelo usuário na turbina ${i + 1}/${items.length}: ${res.processed} ok, ${res.failed} falha(s).`, type: 'warning' }]);
+          setLogs((prev) => [...prev, { text: `Fila parada pelo usuário na turbina ${i + 1}/${items.length}: ${res.processed} ok, ${res.failed} falha(s).`, type: 'warning' }]);
           break;
         }
         if (res.success && res.dryRun) {
           const total = (res.missingDefects || 0) + (res.missingBlanks || 0) + (res.missingVideos || 0);
           setLogs((prev) => [...prev, {
             text: total === 0
-              ? `✓ Turbina ${i + 1}/${items.length}: auditoria concluída, nada faltando.`
-              : `⚠ Turbina ${i + 1}/${items.length}: auditoria concluída, ${total} item(ns) faltando (${res.missingDefects || 0} defeito(s), ${res.missingBlanks || 0} blank(s), ${res.missingVideos || 0} vídeo(s)).`,
+              ? `Turbina ${i + 1}/${items.length}: auditoria concluída, nada faltando.`
+              : `Turbina ${i + 1}/${items.length}: auditoria concluída, ${total} item(ns) faltando (${res.missingDefects || 0} defeito(s), ${res.missingBlanks || 0} blank(s), ${res.missingVideos || 0} vídeo(s)).`,
             type: total === 0 ? 'success' : 'warning'
           }]);
         } else if (res.success) {
           setLogs((prev) => [...prev, {
-            text: `✓ Turbina ${i + 1}/${items.length} concluída: ${res.processed} ok, ${res.failed} falha(s).`,
+            text: `Turbina ${i + 1}/${items.length} concluída: ${res.processed} ok, ${res.failed} falha(s).`,
             type: res.failed > 0 ? 'warning' : 'success'
           }]);
         } else {
-          setLogs((prev) => [...prev, { text: `✗ Turbina ${i + 1}/${items.length} falhou: ${res.error} — seguindo para a próxima.`, type: 'error' }]);
+          setLogs((prev) => [...prev, { text: `Turbina ${i + 1}/${items.length} falhou: ${res.error} — seguindo para a próxima.`, type: 'error' }]);
         }
       } catch (err) {
         const msg = err.message || String(err);
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'failed', result: { error: msg } } : q)));
-        setLogs((prev) => [...prev, { text: `✗ Turbina ${i + 1}/${items.length} erro crítico: ${msg} — seguindo para a próxima.`, type: 'error' }]);
+        setLogs((prev) => [...prev, { text: `Turbina ${i + 1}/${items.length} erro crítico: ${msg} — seguindo para a próxima.`, type: 'error' }]);
       }
     }
 
     setQueueIndex(-1);
     setQueueRunning(false);
-    setLogs((prev) => [...prev, { text: `🏁 Fila overnight concluída — ${items.length} turbina(s) processada(s).`, type: 'success' }]);
+    setLogs((prev) => [...prev, { text: `Fila overnight concluída — ${items.length} turbina(s) processada(s).`, type: 'success' }]);
   };
 
   const handlePauseToggle = async () => {
@@ -475,6 +475,14 @@ export default function SnowAutomationModule({ D }) {
     return D.textSecond;
   };
 
+  const logIcon = (type) => {
+    const color = logColor(type);
+    if (type === 'success') return Icons.checkCircle(color);
+    if (type === 'error') return Icons.xCircle(color);
+    if (type === 'warning') return Icons.alertTriangle(color);
+    return Icons.info(color);
+  };
+
   const accent = '#0284c7'; // Azul do cliente SNOW/NAWP
 
   return (
@@ -497,8 +505,8 @@ export default function SnowAutomationModule({ D }) {
           flexDirection: 'column',
           gap: '10px'
         }}>
-          <div style={{ fontSize: '15px', fontWeight: 700, color: D.textPrimary }}>
-            🚀 Automação Completa
+          <div style={{ fontSize: '15px', fontWeight: 700, color: D.textPrimary, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {Icons.rocket(accent)} Automação Completa
           </div>
 
           <div className="form-group" style={{ margin: 0 }}>
@@ -508,7 +516,7 @@ export default function SnowAutomationModule({ D }) {
               onClick={!busy ? pickControlXlsx : undefined}
               style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
-              <span style={{ color: controlXlsxPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+              <span style={{ display: 'flex', color: controlXlsxPath ? accent : D.textMuted, flexShrink: 0 }}>{Icons.file(controlXlsxPath ? accent : D.textMuted)}</span>
               <span className="input-field-text" title={controlXlsxPath || 'Selecione o arquivo .xlsx'} style={{ fontSize: '12.5px' }}>
                 {controlXlsxPath ? controlXlsxPath.split('\\').pop() : 'Selecione o arquivo .xlsx'}
               </span>
@@ -522,7 +530,7 @@ export default function SnowAutomationModule({ D }) {
               onClick={!busy ? pickWtgRootFolder : undefined}
               style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
-              <span style={{ color: wtgRootFolder ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+              <span style={{ display: 'flex', color: wtgRootFolder ? accent : D.textMuted, flexShrink: 0 }}>{Icons.folder(wtgRootFolder ? accent : D.textMuted)}</span>
               <span className="input-field-text" title={wtgRootFolder || 'Selecione a pasta raiz'} style={{ fontSize: '12.5px' }}>
                 {wtgRootFolder || 'Selecione a pasta raiz'}
               </span>
@@ -607,7 +615,9 @@ export default function SnowAutomationModule({ D }) {
                 cursor: 'pointer'
               }}
             >
-              {paused ? '▶ Retomar' : '⏸ Pausar'}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {paused ? Icons.play('#fff') : Icons.pause(D.textPrimary)} {paused ? 'Retomar' : 'Pausar'}
+              </span>
             </button>
             <button
               onClick={handleStop}
@@ -623,7 +633,9 @@ export default function SnowAutomationModule({ D }) {
                 cursor: 'pointer'
               }}
             >
-              ⏹ Parar
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {Icons.stop(D.error)} Parar
+              </span>
             </button>
           </div>
         )}
@@ -642,7 +654,9 @@ export default function SnowAutomationModule({ D }) {
             textAlign: 'left'
           }}
         >
-          🌎 Configuração por Parque {showWindfarmConfig ? '▲' : '▼'}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            {Icons.globe(D.textSecond)} Configuração por Parque {showWindfarmConfig ? '▲' : '▼'}
+          </span>
         </button>
 
         {showWindfarmConfig && (
@@ -747,7 +761,9 @@ export default function SnowAutomationModule({ D }) {
             padding: '10px 8px',
             userSelect: 'none'
           }}>
-            ⚙️ Turbina manual / fila avulsa (avançado)
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              {Icons.gear(D.textSecond)} Turbina manual / fila avulsa (avançado)
+            </span>
           </summary>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px 8px 12px' }}>
@@ -761,7 +777,7 @@ export default function SnowAutomationModule({ D }) {
               onClick={!busy ? pickExcel : undefined}
               style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
-              <span style={{ color: excelPath ? accent : D.textMuted, flexShrink: 0 }}>📁</span>
+              <span style={{ display: 'flex', color: excelPath ? accent : D.textMuted, flexShrink: 0 }}>{Icons.file(excelPath ? accent : D.textMuted)}</span>
               <span className="input-field-text" title={excelPath || 'Selecione o arquivo .xlsx'}>
                 {excelPath ? excelPath.split('\\').pop() : 'Selecione o arquivo .xlsx'}
               </span>
@@ -778,7 +794,7 @@ export default function SnowAutomationModule({ D }) {
               onClick={!busy ? pickPhotosDir : undefined}
               style={{ cursor: busy ? 'not-allowed' : 'pointer' }}
             >
-              <span style={{ color: localPhotosDir ? accent : D.textMuted, flexShrink: 0 }}>🖼️</span>
+              <span style={{ display: 'flex', color: localPhotosDir ? accent : D.textMuted, flexShrink: 0 }}>{Icons.photos(localPhotosDir ? accent : D.textMuted)}</span>
               <span className="input-field-text" title={localPhotosDir || 'Selecione a pasta Fotos/ (opcional)'}>
                 {localPhotosDir ? localPhotosDir.split('\\').pop() : 'Selecione a pasta Fotos/ (opcional)'}
               </span>
@@ -904,7 +920,7 @@ export default function SnowAutomationModule({ D }) {
               opacity: (loggingIn || busy || !incidentUrl.trim()) ? 0.6 : 1
             }}
           >
-            {loggingIn ? 'Abrindo...' : '🔑 Abrir p/ Login'}
+            {loggingIn ? 'Abrindo...' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>{Icons.key(D.textPrimary)} Abrir p/ Login</span>}
           </button>
           <button
             onClick={handleCloseSession}
@@ -918,10 +934,12 @@ export default function SnowAutomationModule({ D }) {
               padding: '8px 10px',
               fontSize: '12px',
               cursor: busy ? 'not-allowed' : 'pointer',
-              opacity: busy ? 0.6 : 1
+              opacity: busy ? 0.6 : 1,
+              display: 'flex',
+              alignItems: 'center'
             }}
           >
-            ✕
+            {Icons.close(D.textMuted)}
           </button>
         </div>
 
@@ -1002,7 +1020,7 @@ export default function SnowAutomationModule({ D }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
               {queue.map((q, idx) => {
-                const icon = q.status === 'running' ? '▶' : q.status === 'done' ? '✓' : q.status === 'failed' ? '✗' : '⏳';
+                const icon = q.status === 'running' ? Icons.play(accent) : q.status === 'done' ? Icons.check(D.success) : q.status === 'failed' ? Icons.xCircle(D.error) : Icons.hourglass(D.textMuted);
                 const color = q.status === 'running' ? accent : q.status === 'done' ? D.success : q.status === 'failed' ? D.error : D.textMuted;
                 return (
                   <div key={q.id} style={{
@@ -1011,7 +1029,7 @@ export default function SnowAutomationModule({ D }) {
                     background: idx === queueIndex ? `${accent}10` : 'transparent'
                   }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ color, fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={q.label}>
+                      <div style={{ color, fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '5px' }} title={q.label}>
                         {icon} {q.label}
                       </div>
                       <div style={{ color: D.textMuted, fontSize: '10px' }}>
@@ -1026,10 +1044,10 @@ export default function SnowAutomationModule({ D }) {
                       title="Remover da fila"
                       style={{
                         background: 'none', border: 0, color: D.textMuted, cursor: busy ? 'not-allowed' : 'pointer',
-                        fontSize: '12px', flexShrink: 0, marginLeft: '6px'
+                        fontSize: '12px', flexShrink: 0, marginLeft: '6px', display: 'flex', alignItems: 'center'
                       }}
                     >
-                      ✕
+                      {Icons.close(D.textMuted)}
                     </button>
                   </div>
                 );
@@ -1056,7 +1074,7 @@ export default function SnowAutomationModule({ D }) {
               opacity: (busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 0.6 : 1
             }}
           >
-            ➕ Adicionar à Fila
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>{Icons.plus(accent)} Adicionar à Fila</span>
           </button>
 
           {queue.length > 0 && (
@@ -1075,9 +1093,11 @@ export default function SnowAutomationModule({ D }) {
                 opacity: busy && !queueRunning ? 0.6 : 1
               }}
             >
-              {queueRunning
-                ? `🌙 Rodando fila... (${queueIndex + 1}/${queue.length})`
-                : `🌙 Rodar Fila Overnight (${queue.length} turbina(s))`}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {Icons.moon('#fff')} {queueRunning
+                  ? `Rodando fila... (${queueIndex + 1}/${queue.length})`
+                  : `Rodar Fila Overnight (${queue.length} turbina(s))`}
+              </span>
             </button>
           )}
 
@@ -1097,7 +1117,7 @@ export default function SnowAutomationModule({ D }) {
               opacity: (busy || !excelPath || !incidentUrl.trim() || selectedBlades.length === 0) ? 0.6 : 1
             }}
           >
-            {running ? 'Rodando...' : `▶ Rodar Agora (${selectedBlades.length} pá(s))`}
+            {running ? 'Rodando...' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>{Icons.play('#fff')} Rodar Agora ({selectedBlades.length} pá(s))</span>}
           </button>
         </div>
 
@@ -1127,9 +1147,9 @@ export default function SnowAutomationModule({ D }) {
           ) : <span />}
           <button
             onClick={handleOpenLogsFolder}
-            style={{ background: 'none', border: `1px solid ${D.borderLight}`, color: D.textSecond, borderRadius: '6px', padding: '5px 9px', fontSize: '10.5px', cursor: 'pointer' }}
+            style={{ background: 'none', border: `1px solid ${D.borderLight}`, color: D.textSecond, borderRadius: '6px', padding: '5px 9px', fontSize: '10.5px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
           >
-            📁 Abrir pasta de logs
+            {Icons.opendir(D.textSecond)} Abrir pasta de logs
           </button>
         </div>
 
@@ -1148,10 +1168,10 @@ export default function SnowAutomationModule({ D }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
               {openTabs.map((t) => (
                 <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px', borderRadius: '5px', background: D.bgHover }}>
-                  <span style={{ color: D.textSecond, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {t.purpose === 'video-review' ? '🎬' : '📝'} {t.turbine || ''} {t.blade ? `· ${t.blade}` : ''} · {t.label} · {tabAge(t.openedAt)}
+                  <span style={{ color: D.textSecond, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                    {t.purpose === 'video-review' ? Icons.video(D.textSecond) : Icons.fileText(D.textSecond)} {t.turbine || ''} {t.blade ? `· ${t.blade}` : ''} · {t.label} · {tabAge(t.openedAt)}
                   </span>
-                  <button onClick={() => handleCloseTab(t.id)} style={{ background: 'none', border: 0, color: D.textMuted, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                  <button onClick={() => handleCloseTab(t.id)} style={{ background: 'none', border: 0, color: D.textMuted, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center' }}>{Icons.close(D.textMuted)}</button>
                 </div>
               ))}
             </div>
@@ -1177,8 +1197,9 @@ export default function SnowAutomationModule({ D }) {
             </div>
           ) : (
             logs.map((log, idx) => (
-              <div key={idx} style={{ color: logColor(log.type), whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
-                {log.text}
+              <div key={idx} style={{ color: logColor(log.type), whiteSpace: 'pre-wrap', lineHeight: '1.4', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                <span style={{ display: 'flex', flexShrink: 0, marginTop: '2px' }}>{logIcon(log.type)}</span>
+                <span>{log.text}</span>
               </div>
             ))
           )}

@@ -95,12 +95,17 @@ export class RunLogger {
 /** Encapsula um `log_fn` existente pra também gravar cada linha no arquivo —
  * usado nos handlers de IPC (`index.ts`), sem precisar mexer no resto do
  * código de automação, que já emite log normalmente. */
-export function wrapWithRunLogger(prefix: string, log: (msg: string) => void): { log: (msg: string) => void; logger: RunLogger } {
+type LogType = 'info' | 'success' | 'warning' | 'error'
+
+export function wrapWithRunLogger(
+  prefix: string,
+  log: (msg: string, type?: LogType) => void
+): { log: (msg: string, type?: LogType) => void; logger: RunLogger } {
   const logger = new RunLogger(prefix)
   return {
-    log: (msg: string) => {
+    log: (msg: string, type?: LogType) => {
       logger.write(msg)
-      log(msg)
+      log(msg, type)
     },
     logger
   }

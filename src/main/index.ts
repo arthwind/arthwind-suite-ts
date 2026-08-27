@@ -459,8 +459,8 @@ app.whenReady().then(() => {
       incidentUrl: string,
       options: { headless?: boolean; startRow?: number; endRow?: number; selectedBlades?: string[] }
     ) => {
-      const { log, logger } = wrapWithRunLogger('snow_defeitos', (msg: string) => {
-        event.sender.send('snow_automation_log', { msg })
+      const { log, logger } = wrapWithRunLogger('snow_defeitos', (msg: string, type?: 'info' | 'success' | 'warning' | 'error') => {
+        event.sender.send('snow_automation_log', { msg, type })
       })
       setCurrentRunLogger(logger)
       try {
@@ -486,8 +486,8 @@ app.whenReady().then(() => {
       technician: string,
       options: { headless?: boolean; onlyIncNumbers?: string[] }
     ) => {
-      const { log, logger } = wrapWithRunLogger('snow_inspection_report', (msg: string) => {
-        event.sender.send('snow_automation_log', { msg })
+      const { log, logger } = wrapWithRunLogger('snow_inspection_report', (msg: string, type?: 'info' | 'success' | 'warning' | 'error') => {
+        event.sender.send('snow_automation_log', { msg, type })
       })
       setCurrentRunLogger(logger)
       try {
@@ -559,8 +559,8 @@ app.whenReady().then(() => {
       technician: string,
       options: Parameters<typeof runFullAutomation>[4]
     ) => {
-      const { log, logger } = wrapWithRunLogger('snow_completa', (msg: string) => {
-        event.sender.send('snow_automation_log', { msg })
+      const { log, logger } = wrapWithRunLogger('snow_completa', (msg: string, type?: 'info' | 'success' | 'warning' | 'error') => {
+        event.sender.send('snow_automation_log', { msg, type })
       })
       setCurrentRunLogger(logger)
       try {

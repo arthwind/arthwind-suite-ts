@@ -48,7 +48,8 @@ export interface DamageReportRow {
 }
 
 
-type LogFn = (msg: string) => void
+type LogType = 'info' | 'success' | 'warning' | 'error'
+type LogFn = (msg: string, type?: LogType) => void
 
 function isVideoFile(fileName: string): boolean {
   const lower = fileName.toLowerCase()
@@ -345,7 +346,7 @@ class ServiceNowFormFiller {
 
     let current = await readStable()
     if (!matches(current)) {
-      this.log(`  ⚠ [${fieldLabel}] Seleção não confirmada/estável (queria "${optionText}", ficou "${current || '(vazio/instável)'}") — tentando de novo...`)
+      this.log(`  [${fieldLabel}] Seleção não confirmada/estável (queria "${optionText}", ficou "${current || '(vazio/instável)'}") — tentando de novo...`, 'warning')
       await attemptOnce()
       current = await readStable()
     }
@@ -393,7 +394,7 @@ class ServiceNowFormFiller {
 
     const visible = await checkbox.isVisible({ timeout: 2000 }).catch(() => false)
     if (!visible) {
-      this.log(`  ⚠ Checkbox [${fieldLabel}] não encontrado — pulando.`)
+      this.log(`  Checkbox [${fieldLabel}] não encontrado — pulando.`, 'warning')
       return
     }
 
@@ -481,7 +482,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
     const logEveryMs = 15000
     const start = Date.now()
     let lastLog = start
-    this.log(`  ⏳ Enviando vídeo (${fileName})... isso pode levar alguns minutos.`)
+    this.log(`  Enviando vídeo (${fileName})... isso pode levar alguns minutos.`)
     while (Date.now() - start < timeoutMs) {
       const appeared = await scope
         .getByText(fileName, { exact: false })
@@ -489,16 +490,16 @@ class DamageEntryFiller extends ServiceNowFormFiller {
         .isVisible({ timeout: 500 })
         .catch(() => false)
       if (appeared) {
-        this.log(`  ✓ Upload do vídeo (${fileName}) concluído em ${Math.round((Date.now() - start) / 1000)}s.`)
+        this.log(`  Upload do vídeo (${fileName}) concluído em ${Math.round((Date.now() - start) / 1000)}s.`, 'success')
         return
       }
       if (Date.now() - lastLog >= logEveryMs) {
         lastLog = Date.now()
-        this.log(`  ⏳ Ainda enviando o vídeo (${fileName})... (${Math.round((Date.now() - start) / 1000)}s)`)
+        this.log(`  Ainda enviando o vídeo (${fileName})... (${Math.round((Date.now() - start) / 1000)}s)`)
       }
       await this.page.waitForTimeout(pollIntervalMs)
     }
-    this.log(`  ⚠ Não foi possível confirmar o fim do upload do vídeo (${fileName}) em ${Math.round(timeoutMs / 1000)}s — seguindo mesmo assim.`)
+    this.log(`  Não foi possível confirmar o fim do upload do vídeo (${fileName}) em ${Math.round(timeoutMs / 1000)}s — seguindo mesmo assim.`, 'warning')
   }
 
   private async uploadPhotos(
@@ -544,7 +545,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
         tempPaths.push(dst1, dst2)
         this.log(`  Enviando 2 foto(s) com nomes estritos (${p1Name}, ${p2Name})...`)
       } else if (data.photoUrls && data.photoUrls.length > 0) {
-        this.log(`  ℹ Arquivo de mídia (${data.photoUrls[0]}) não encontrado na pasta local. Ignorando anexo.`)
+        this.log(`  Arquivo de mídia (${data.photoUrls[0]}) não encontrado na pasta local. Ignorando anexo.`)
       }
 
 
@@ -589,7 +590,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
             if (pagesNow.length > pagesBefore) {
               for (const extraPage of pagesNow.slice(pagesBefore)) {
                 if (extraPage !== this.page && !extraPage.isClosed()) {
-                  this.log(`  ⚠ O clique em "Add attachments" abriu uma aba inesperada — fechando (provavelmente acertou um anexo já existente por engano).`)
+                  this.log(`  O clique em "Add attachments" abriu uma aba inesperada — fechando (provavelmente acertou um anexo já existente por engano).`, 'warning')
                   await extraPage.close().catch(() => {})
                 }
               }
@@ -598,7 +599,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
             if (fileChooser) {
               await fileChooser.setFiles([filePath])
               setViaChooser = true
-              this.log(`  ✓ Foto ${i + 1}/${tempPaths.length} (${fileName}) anexada via filechooser!`)
+              this.log(`  Foto ${i + 1}/${tempPaths.length} (${fileName}) anexada via filechooser!`, 'success')
             }
           }
 
@@ -606,7 +607,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
             const fileInput = scope.locator('input[type="file"]').last().or(scope.locator('input[type="file"]').first())
             await fileInput.evaluate((el: HTMLInputElement) => el.setAttribute('multiple', 'multiple')).catch(() => {})
             await fileInput.setInputFiles([filePath])
-            this.log(`  ✓ Foto ${i + 1}/${tempPaths.length} (${fileName}) anexada via input DOM!`)
+            this.log(`  Foto ${i + 1}/${tempPaths.length} (${fileName}) anexada via input DOM!`, 'success')
           }
 
           // Aguarda o encerramento do upload do ServiceNow para o arquivo atual.
@@ -632,7 +633,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
         }
       }
     } catch (err: any) {
-      this.log(`  ⚠ Erro no upload de fotos: ${err.message || err}`)
+      this.log(`  Erro no upload de fotos: ${err.message || err}`, 'warning')
     } finally {
       for (const p of tempPaths) {
         try {
@@ -663,7 +664,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
           await setOptionalCheckbox.check({ force: true }).catch(async () => {
             await setOptionalCheckbox.click({ force: true })
           })
-          this.log(`    ✓ Checkbox 'Set Optional Fields' marcado.`)
+          this.log(`    Checkbox 'Set Optional Fields' marcado.`, 'success')
           await this.page.waitForTimeout(500)
         }
       } else {
@@ -674,7 +675,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
       // Se a opção SN_241 já está presente na tabela Optional Fields, não adiciona de novo
       const alreadyAdded = await scope.getByText(/SN_241|NR81\.5/i).first().isVisible({ timeout: 1000 }).catch(() => false)
       if (alreadyAdded) {
-        this.log(`    ✓ Opção SN_241 já está presente na tabela Optional Fields.`)
+        this.log(`    Opção SN_241 já está presente na tabela Optional Fields.`, 'success')
         return
       }
 
@@ -694,7 +695,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
         await scope.getByText(/^add$/i).first().click({ force: true }).catch(() => {})
       }
 
-      this.log(`    ✓ Clicado no botão Add. Aguardando a modal 'Add Row'...`)
+      this.log(`    Clicado no botão Add. Aguardando a modal 'Add Row'...`, 'success')
       await this.page.waitForTimeout(600)
 
       // 3. Modal "Add Row" (busca na página global para encontrar a modal e a lista Select2 anexada ao document.body)
@@ -747,7 +748,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
           await trueFalseCheckbox.check({ force: true }).catch(async () => {
             await trueFalseCheckbox.click({ force: true })
           })
-          this.log(`    ✓ Checkbox 'True / False' marcado.`)
+          this.log(`    Checkbox 'True / False' marcado.`, 'success')
           await this.page.waitForTimeout(300)
         }
       }
@@ -759,11 +760,11 @@ class DamageEntryFiller extends ServiceNowFormFiller {
         .first()
 
       await modalAddBtn.click({ force: true })
-      this.log(`    ✓ Opção SN_241 adicionada com sucesso na modal!`)
+      this.log(`    Opção SN_241 adicionada com sucesso na modal!`, 'success')
       await this.page.waitForTimeout(800)
 
     } catch (err: any) {
-      this.log(`    ⚠ Erro ao configurar Optional Fields: ${err.message || err}`)
+      this.log(`    Erro ao configurar Optional Fields: ${err.message || err}`, 'warning')
     }
   }
 
@@ -854,7 +855,7 @@ class DamageEntryFiller extends ServiceNowFormFiller {
     if (autoSubmit) {
       await this.submitAndReadEntry()
     } else {
-      this.log(`  ✓ Formulário e fotos preenchidos! (Modo conferência ativo: mantendo formulário aberto).`)
+      this.log(`  Formulário e fotos preenchidos! (Modo conferência ativo: mantendo formulário aberto).`, 'success')
     }
   }
 
@@ -993,13 +994,13 @@ async function generateDailyActivityReport(
 ): Promise<string | null> {
   const templatePath = findDailyReportTemplate()
   if (!templatePath) {
-    log(`  ⚠ Molde do Daily Activity Report não encontrado (resources/daily_activity_report_template.xlsx) — pulando anexo.`)
+    log(`  Molde do Daily Activity Report não encontrado (resources/daily_activity_report_template.xlsx) — pulando anexo.`, 'warning')
     return null
   }
 
   const config = data.windfarm ? getWindfarmConfig(data.windfarm) : null
   if (!config) {
-    log(`  ⚠ Parque "${data.windfarm ?? '?'}" sem líder/técnico cadastrado (Configuração por Parque) — pulando Daily Activity Report.`)
+    log(`  Parque "${data.windfarm ?? '?'}" sem líder/técnico cadastrado (Configuração por Parque) — pulando Daily Activity Report.`, 'warning')
     return null
   }
   const technicians = config.technicians.length > 0 ? config.technicians : ['']
@@ -1058,7 +1059,7 @@ async function generateDailyActivityReport(
     }
 
     if (!filledAny) {
-      log(`  ⚠ Nenhuma pá com serial conhecido pro Daily Activity Report — pulando anexo.`)
+      log(`  Nenhuma pá com serial conhecido pro Daily Activity Report — pulando anexo.`, 'warning')
       return null
     }
 
@@ -1070,7 +1071,7 @@ async function generateDailyActivityReport(
     fs.writeFileSync(outPath, outBuf)
     return outPath
   } catch (err: any) {
-    log(`  ⚠ Falha ao gerar o Daily Activity Report a partir do molde: ${err.message || err}`)
+    log(`  Falha ao gerar o Daily Activity Report a partir do molde: ${err.message || err}`, 'warning')
     return null
   }
 }
@@ -1091,7 +1092,7 @@ async function extractDailyReportIrNumber(page: Page, log: LogFn): Promise<strin
       if (m) return m[1].toUpperCase()
     }
   }
-  log(`  ⚠ Não achou o número do relatório (IR######) no texto de instruções da tela.`)
+  log(`  Não achou o número do relatório (IR######) no texto de instruções da tela.`, 'warning')
   return null
 }
 
@@ -1112,20 +1113,20 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     if (data.purchaseOrder) {
       await this.fillText('Purchase Order', data.purchaseOrder)
     } else {
-      this.log(`  ⚠ Parque "${data.windfarm ?? '?'}" sem Purchase Order cadastrado — campo deixado como estava.`)
+      this.log(`  Parque "${data.windfarm ?? '?'}" sem Purchase Order cadastrado — campo deixado como estava.`, 'warning')
     }
 
     if (data.bladeA.serial) await this.fillText('Blade A serial number', data.bladeA.serial)
-    else this.log(`  ⚠ Blade A não encontrada em blade_sets.json — campo deixado como estava.`)
+    else this.log(`  Blade A não encontrada em blade_sets.json — campo deixado como estava.`, 'warning')
     if (data.bladeB.serial) await this.fillText('Blade B serial number', data.bladeB.serial)
-    else this.log(`  ⚠ Blade B não encontrada em blade_sets.json — campo deixado como estava.`)
+    else this.log(`  Blade B não encontrada em blade_sets.json — campo deixado como estava.`, 'warning')
     if (data.bladeC.serial) await this.fillText('Blade C serial number', data.bladeC.serial)
-    else this.log(`  ⚠ Blade C não encontrada em blade_sets.json — campo deixado como estava.`)
+    else this.log(`  Blade C não encontrada em blade_sets.json — campo deixado como estava.`, 'warning')
 
     if (data.bladeSetNumber) {
       await this.fillText('Blade set number', data.bladeSetNumber)
     } else {
-      this.log(`  ⚠ Blade set number não encontrado em blade_sets.json — campo deixado como estava.`)
+      this.log(`  Blade set number não encontrado em blade_sets.json — campo deixado como estava.`, 'warning')
     }
 
     // Blade manufacturing location fica vazio de propósito (fixo pra campanha) —
@@ -1133,7 +1134,7 @@ class InspectionReportFiller extends ServiceNowFormFiller {
 
     const submitted = await this.submitForm()
     if (!submitted) {
-      this.log(`  ✗ Não achou o botão Submit do Inspection Report.`)
+      this.log(`  Não achou o botão Submit do Inspection Report.`, 'error')
       return false
     }
 
@@ -1157,9 +1158,9 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     }
 
     if (ready) {
-      this.log(`  ✓ Inspection Report submetido e carregado (Add Damage Entry disponível).`)
+      this.log(`  Inspection Report submetido e carregado (Add Damage Entry disponível).`, 'success')
     } else {
-      this.log(`  ⚠ Inspection Report submetido, mas a página não confirmou carregamento em ~30s — seguindo mesmo assim.`)
+      this.log(`  Inspection Report submetido, mas a página não confirmou carregamento em ~30s — seguindo mesmo assim.`, 'warning')
     }
     return true
   }
@@ -1225,12 +1226,12 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     }
 
     if (!(await attachmentBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
-      this.log(`  ⚠ Botão "Add attachments" não encontrado — não deu pra subir ${label}.`)
+      this.log(`  Botão "Add attachments" não encontrado — não deu pra subir ${label}.`, 'warning')
       await this.dumpAttachmentDebugInfo(label)
       return false
     }
     if (usedFallback) {
-      this.log(`  ⚠ Botão específico de anexo não encontrado — usando seletor largo (pode clicar no elemento errado).`)
+      this.log(`  Botão específico de anexo não encontrado — usando seletor largo (pode clicar no elemento errado).`, 'warning')
     }
 
     const pagesBefore = this.page.context().pages().length
@@ -1257,7 +1258,7 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     }
 
     if (!fileChooser) {
-      this.log(`  ⚠ Não abriu o seletor de arquivo pra anexar ${label}.`)
+      this.log(`  Não abriu o seletor de arquivo pra anexar ${label}.`, 'warning')
       // Diagnóstico: usuário reportou que o clique não faz NADA visível (nem o
       // modal abre) — sinal de que o seletor está clicando no elemento errado.
       // Em vez de tentar adivinhar de novo às cegas, tira um screenshot + lista
@@ -1268,7 +1269,7 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     }
 
     await fileChooser.setFiles([filePath])
-    this.log(`  ✓ ${label} anexado: ${path.basename(filePath)}`)
+    this.log(`  ${label} anexado: ${path.basename(filePath)}`, 'success')
     await this.page.waitForTimeout(1500)
 
     // Se o modal "Add attachments" ainda estiver aberto (fluxo de 2 cliques),
@@ -1295,12 +1296,12 @@ class InspectionReportFiller extends ServiceNowFormFiller {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       const screenshotPath = path.join(dir, `${stamp}_${label.replace(/\s+/g, '_')}.png`)
       await this.page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
-      this.log(`  🔍 [debug] Screenshot salvo: ${screenshotPath}`)
+      this.log(`  [debug] Screenshot salvo: ${screenshotPath}`)
 
       const scope = this.getScope()
       const candidates = scope.locator('[title*="attach" i], [aria-label*="attach" i], [class*="attach" i]')
       const count = await candidates.count().catch(() => 0)
-      this.log(`  🔍 [debug] ${count} elemento(s) com "attach" no title/aria-label/class:`)
+      this.log(`  [debug] ${count} elemento(s) com "attach" no title/aria-label/class:`)
       for (let i = 0; i < Math.min(count, 10); i++) {
         const el = candidates.nth(i)
         const tag = await el.evaluate((n) => n.tagName).catch(() => '?')
@@ -1311,7 +1312,7 @@ class InspectionReportFiller extends ServiceNowFormFiller {
         this.log(`    - <${tag}> visible=${visible} title="${title || ''}" aria-label="${ariaLabel || ''}" class="${cls || ''}"`)
       }
     } catch (err: any) {
-      this.log(`  ⚠ [debug] Falha ao gerar diagnóstico: ${err.message || err}`)
+      this.log(`  [debug] Falha ao gerar diagnóstico: ${err.message || err}`, 'warning')
     }
   }
 
@@ -1350,9 +1351,9 @@ class InspectionReportFiller extends ServiceNowFormFiller {
     await checkText('Blade set number', data.bladeSetNumber)
 
     if (mismatches.length === 0) {
-      this.log(`  ✓ Auditoria do Inspection Report: todos os campos conferidos batem.`)
+      this.log(`  Auditoria do Inspection Report: todos os campos conferidos batem.`, 'success')
     } else {
-      this.log(`  ⚠ Auditoria do Inspection Report encontrou ${mismatches.length} divergência(s):`)
+      this.log(`  Auditoria do Inspection Report encontrou ${mismatches.length} divergência(s):`, 'warning')
       for (const m of mismatches) this.log(`    - ${m}`)
     }
 
@@ -1399,7 +1400,7 @@ export async function findAndOpenIncident(
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
     await page.waitForTimeout(1500)
   } else {
-    log(`  ⚠ Não achou o tile "My Inspection Reports" na home do portal (esperou ~12s) — tentando seguir mesmo assim.`)
+    log(`  Não achou o tile "My Inspection Reports" na home do portal (esperou ~12s) — tentando seguir mesmo assim.`, 'warning')
   }
 
   const searchBox = page
@@ -1408,7 +1409,7 @@ export async function findAndOpenIncident(
     .first()
 
   if (!(await waitVisibleWithRetry(searchBox))) {
-    log(`  ⚠ Não achou a caixa de busca "Keyword Search" na lista "Technical Incidents" (esperou ~12s).`)
+    log(`  Não achou a caixa de busca "Keyword Search" na lista "Technical Incidents" (esperou ~12s).`, 'warning')
     return false
   }
   await searchBox.fill(incNumber)
@@ -1418,7 +1419,7 @@ export async function findAndOpenIncident(
 
   const resultLink = page.getByText(incNumber, { exact: true }).first()
   if (!(await waitVisibleWithRetry(resultLink))) {
-    log(`  ⚠ INC "${incNumber}" não apareceu na busca de Technical Incidents (esperou ~12s).`)
+    log(`  INC "${incNumber}" não apareceu na busca de Technical Incidents (esperou ~12s).`, 'warning')
     return false
   }
   await resultLink.click({ force: true }).catch(() => {})
@@ -1447,7 +1448,7 @@ export async function detectInspectionReportState(page: Page, log: LogFn): Promi
       return 'show'
     }
   }
-  log(`  ⚠ Não achou nem "Create Inspection Report" nem "Show Inspection Report" na tela do INC.`)
+  log(`  Não achou nem "Create Inspection Report" nem "Show Inspection Report" na tela do INC.`, 'warning')
   return 'unknown'
 }
 
@@ -1465,7 +1466,7 @@ async function clickInspectionReportButton(page: Page, state: 'create' | 'show',
       return true
     }
   }
-  log(`  ⚠ Não achou o botão "${state === 'create' ? 'Create' : 'Show'} Inspection Report" pra clicar.`)
+  log(`  Não achou o botão "${state === 'create' ? 'Create' : 'Show'} Inspection Report" pra clicar.`, 'warning')
   return false
 }
 
@@ -1490,7 +1491,7 @@ export async function ensureInspectionReport(
   if (!clicked) return false
 
   if (state === 'show') {
-    log(`  ✓ Inspection Report de ${entry.wtg} (${entry.incNumber}) já existia — nada a preencher.`)
+    log(`  Inspection Report de ${entry.wtg} (${entry.incNumber}) já existia — nada a preencher.`, 'success')
     return true
   }
 
@@ -1550,7 +1551,7 @@ export async function runInspectionReportPhase(
     filtered = filtered.filter((e) => !isAlreadySentToClient(e.statusSnow))
     const skippedCount = beforeCount - filtered.length
     if (skippedCount > 0) {
-      log(`ℹ ${skippedCount} turbina(s) com Status SNOW "Enviado..." na planilha de controle — Inspection Report já deve existir, pulando sem tentar buscar.`)
+      log(`${skippedCount} turbina(s) com Status SNOW "Enviado..." na planilha de controle — Inspection Report já deve existir, pulando sem tentar buscar.`)
     }
   }
 
@@ -1564,7 +1565,7 @@ export async function runInspectionReportPhase(
     }
   }
 
-  log(`🏗 Fase 0 (Inspection Report): ${filtered.length} turbina(s) a processar.`)
+  log(`Fase 0 (Inspection Report): ${filtered.length} turbina(s) a processar.`)
 
   let context: BrowserContext
   try {
@@ -1611,24 +1612,24 @@ export async function runInspectionReportPhase(
       const ok = await ensureInspectionReport(page, portalOrigin, entry, technician, log)
       if (ok) {
         processed++
-        log(`✓ ${prefix} ${entry.wtg} (${entry.incNumber}) OK.`)
+        log(`${prefix} ${entry.wtg} (${entry.incNumber}) OK.`, 'success')
       } else {
         failed++
-        const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}) falhou.`
+        const msg = `${prefix} ${entry.wtg} (${entry.incNumber}) falhou.`
         errors.push(msg)
-        log(msg)
+        log(msg, 'error')
       }
     } catch (err: any) {
       failed++
-      const msg = `✗ ${prefix} ${entry.wtg} (${entry.incNumber}) erro: ${err.message}`
+      const msg = `${prefix} ${entry.wtg} (${entry.incNumber}) erro: ${err.message}`
       errors.push(msg)
-      log(msg)
+      log(msg, 'error')
     } finally {
       await page.close().catch(() => {})
     }
   }
 
-  log(`🏁 Fase 0 concluída: ${processed} ok, ${failed} falha(s).`)
+  log(`Fase 0 concluída: ${processed} ok, ${failed} falha(s).`, 'success')
   return { success: true, processed, failed, errors }
 }
 
@@ -1698,7 +1699,7 @@ export async function runFullAutomation(
   }
 
   if (skippedNoFolder > 0) {
-    log(`ℹ ${skippedNoFolder} turbina(s) pendente(s) na planilha, mas sem pasta pronta em "${wtgRootFolder}" ainda — puladas (não é erro).`)
+    log(`${skippedNoFolder} turbina(s) pendente(s) na planilha, mas sem pasta pronta em "${wtgRootFolder}" ainda — puladas (não é erro).`)
   }
 
   const toProcess = options.mode === 'next' ? matched.slice(0, 1) : matched
@@ -1714,7 +1715,7 @@ export async function runFullAutomation(
     }
   }
 
-  log(`🚀 Automação completa: ${toProcess.length} turbina(s) prontas (Inspection Report + Defeitos).`)
+  log(`Automação completa: ${toProcess.length} turbina(s) prontas (Inspection Report + Defeitos).`)
 
   let context: BrowserContext
   try {
@@ -1769,7 +1770,7 @@ export async function runFullAutomation(
       await checkpoint(log)
     } catch (err) {
       if (err instanceof AutomationStoppedError) {
-        log(`⏹ Parado pelo usuário — ${processed} ok, ${failed} falha(s), ${toProcess.length - i} turbina(s) não processada(s).`)
+        log(`Parado pelo usuário — ${processed} ok, ${failed} falha(s), ${toProcess.length - i} turbina(s) não processada(s).`, 'warning')
         return { success: true, processed, failed, skippedNoFolder, errors, stopped: true }
       }
       throw err
@@ -1798,7 +1799,7 @@ export async function runFullAutomation(
         const submitted = await filler.fill(data)
         if (!submitted) throw new Error('Falha ao submeter o Inspection Report.')
       } else {
-        log(`  ✓ ${prefix} Inspection Report de ${entry.wtg} já existia — indo direto pros defeitos.`)
+        log(`  ${prefix} Inspection Report de ${entry.wtg} já existia — indo direto pros defeitos.`, 'success')
       }
 
       // Segunda auditoria pedida pelo usuário: confere se o que devia estar
@@ -1828,7 +1829,7 @@ export async function runFullAutomation(
       // logo abaixo, tanto no `.txt` da turbina quanto nos `errors` do resultado.
       const turbineExtraPendencies: string[] = []
       if (await filler.hasDailyActivityReportAttached()) {
-        log(`  ℹ ${prefix} Daily Activity Report já estava anexado — não sobe de novo.`)
+        log(`  ${prefix} Daily Activity Report já estava anexado — não sobe de novo.`)
       } else {
         let dailyAttached = false
         const irNumber = await extractDailyReportIrNumber(page, log)
@@ -1841,12 +1842,12 @@ export async function runFullAutomation(
             }
           }
         } else {
-          log(`  ⚠ ${prefix} Não achou o número do relatório na tela — Daily Activity Report não foi gerado.`)
+          log(`  ${prefix} Não achou o número do relatório na tela — Daily Activity Report não foi gerado.`, 'warning')
         }
         if (!dailyAttached) {
-          const msg = `✗ [${entry.wtg}] ${prefix} Daily Activity Report NÃO ficou anexado (ver aviso acima) — turbina fica pendente.`
+          const msg = `[${entry.wtg}] ${prefix} Daily Activity Report NÃO ficou anexado (ver aviso acima) — turbina fica pendente.`
           turbineExtraPendencies.push(msg)
-          log(msg)
+          log(msg, 'error')
         }
       }
 
@@ -1855,7 +1856,7 @@ export async function runFullAutomation(
       // usuário digitar uma. Fecha essa aba antes de chamar o Módulo 24
       // porque ele abre/gerencia as próprias abas a partir daqui.
       const derivedIncidentUrl = page.url()
-      log(`  ℹ ${prefix} URL do Inspection Report capturada: ${derivedIncidentUrl}`)
+      log(`  ${prefix} URL do Inspection Report capturada: ${derivedIncidentUrl}`)
       await page.close().catch(() => {})
 
       // Espera o fechamento de verdade se propagar antes de seguir — bug real
@@ -1893,29 +1894,29 @@ export async function runFullAutomation(
         ]
         errors.push(...turbineExtraPendencies)
         const reportPath = writeTurbinePendingReport(entry.wtg, entry.incNumber, missing)
-        log(`  [${entry.wtg}] ${prefix} 📄 Pendências salvas em: ${reportPath}`)
+        log(`  [${entry.wtg}] ${prefix} Pendências salvas em: ${reportPath}`)
       }
 
       if (moduleResult.success) {
         processed++
-        log(`✓ [${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.processed} defeito(s) ok, ${moduleResult.failed} falha(s).`)
+        log(`[${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.processed} defeito(s) ok, ${moduleResult.failed} falha(s).`, 'success')
       } else {
         failed++
-        const msg = `✗ [${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.error}`
+        const msg = `[${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${moduleResult.error}`
         errors.push(msg)
-        log(msg)
+        log(msg, 'error')
       }
     } catch (err: any) {
       failed++
-      const msg = `✗ [${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${err.message}`
+      const msg = `[${entry.wtg}] ${prefix} ${entry.wtg} (${entry.incNumber}): ${err.message}`
       errors.push(msg)
       writeTurbinePendingReport(entry.wtg, entry.incNumber, [err.message])
-      log(msg)
+      log(msg, 'error')
       await page.close().catch(() => {})
     }
   }
 
-  log(`🏁 Automação completa concluída: ${processed} ok, ${failed} falha(s), ${skippedNoFolder} sem pasta pronta.`)
+  log(`Automação completa concluída: ${processed} ok, ${failed} falha(s), ${skippedNoFolder} sem pasta pronta.`, 'success')
   return { success: true, processed, failed, skippedNoFolder, errors }
 }
 
@@ -2518,7 +2519,7 @@ async function navigateToDamageEntriesList(page: Page, log: LogFn): Promise<bool
   }
 
   if (await tryClick(false)) {
-    log(`  ✓ Clicado no link 'Damage Report Entries' (Related Lists)`)
+    log(`  Clicado no link 'Damage Report Entries' (Related Lists)`, 'success')
     return true
   }
 
@@ -2532,12 +2533,12 @@ async function navigateToDamageEntriesList(page: Page, log: LogFn): Promise<bool
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {})
     const debugThisAttempt = attempt >= MAX_ATTEMPTS - 3 // só nas últimas 3, evita poluir o log
     if (await tryClick(debugThisAttempt)) {
-      log(`  ✓ Clicado no link 'Damage Report Entries' (após rolar até o final da página, tentativa ${attempt + 1})`)
+      log(`  Clicado no link 'Damage Report Entries' (após rolar até o final da página, tentativa ${attempt + 1})`, 'success')
       return true
     }
     await page.waitForTimeout(1000)
   }
-  log(`  ⚠ Depois de ${MAX_ATTEMPTS} tentativas, o link "Damage Report Entries" nunca resultou em navegação de verdade.`)
+  log(`  Depois de ${MAX_ATTEMPTS} tentativas, o link "Damage Report Entries" nunca resultou em navegação de verdade.`, 'warning')
   return false
 }
 
@@ -2805,9 +2806,9 @@ async function scanCurrentListPage(
         // tabela ao vivo ficou diferente da chave esperada (Sub Component/Failure Type
         // com texto levemente diferente do que foi digitado, DF lido da coluna errada
         // etc.) sem adivinhar.
-        log(`  🔎 [debug] Já na tabela ao vivo: chave "${baseKey}"`)
+        log(`  [debug] Já na tabela ao vivo: chave "${baseKey}"`)
         if (group.length > 1) {
-          log(`  ⚠ ${group.length} linha(s) com a mesma pá+componente+falha+DF ("${baseKey}") fora do padrão de vídeo — tratando como duplicata já cadastrada.`)
+          log(`  ${group.length} linha(s) com a mesma pá+componente+falha+DF ("${baseKey}") fora do padrão de vídeo — tratando como duplicata já cadastrada.`, 'warning')
         }
         continue
       }
@@ -2827,11 +2828,11 @@ async function scanCurrentListPage(
       // outras pás direito. Por isso todo grupo de vídeo, tenha 1 ou mais linhas,
       // sempre lê o anexo de cada uma pra saber o quadrante exato.
       if (attachmentLookupsUsed + group.length > MAX_ATTACHMENT_LOOKUPS) {
-        log(`  ⚠ Muitas linhas de vídeo pra desambiguar (${group.length}) — acima do teto, NÃO marcando nenhuma como já cadastrada.`)
+        log(`  Muitas linhas de vídeo pra desambiguar (${group.length}) — acima do teto, NÃO marcando nenhuma como já cadastrada.`, 'warning')
         continue
       }
 
-      log(`  ℹ ${group.length} vídeo(s) com a mesma pá+DF — lendo o nome do anexo de cada um pra saber qual quadrante (Section+Area) já existe...`)
+      log(`  ${group.length} vídeo(s) com a mesma pá+DF — lendo o nome do anexo de cada um pra saber qual quadrante (Section+Area) já existe...`)
       for (const info of group) {
         attachmentLookupsUsed++
         await rows.nth(info.r).click({ force: true }).catch(() => {})
@@ -2839,18 +2840,18 @@ async function scanCurrentListPage(
         const quadrant = result.kind === 'video' ? parseVideoAttachmentQuadrant(result.filename) : null
         if (quadrant && result.kind === 'video') {
           auditSet.add(`${baseKey}_${quadrant.sectionNorm}_shell_${quadrant.areaNorm}`)
-          log(`  ✓ ${info.damNumber || '?'}: anexo "${result.filename}" → ${quadrant.sectionNorm} / ${quadrant.areaNorm}.`)
+          log(`  ${info.damNumber || '?'}: anexo "${result.filename}" → ${quadrant.sectionNorm} / ${quadrant.areaNorm}.`, 'success')
         } else if (result.kind === 'photo') {
           // Não é vídeo de verdade (Failure Type "Type of failure is missing" também
           // é usado por defeitos de foto) — marca pela chave normal (sem qualificação
           // de quadrante), igual ao caminho não-vídeo, pra não reprocessar/duplicar.
           auditSet.add(baseKey)
-          log(`  ✓ ${info.damNumber || '?'}: tem anexo de foto (não vídeo) — marcando como defeito comum já cadastrado ("${baseKey}").`)
+          log(`  ${info.damNumber || '?'}: tem anexo de foto (não vídeo) — marcando como defeito comum já cadastrado ("${baseKey}").`, 'success')
         } else {
           // Sem confirmar qual quadrante é, não marca nada — mesma filosofia de
           // sempre: prefere o risco de reabrir uma aba já feita a pular um vídeo que
           // falta de verdade.
-          log(`  ⚠ Não deu pra ler o anexo da linha ${info.damNumber || '(número desconhecido)'} — não marcando como já cadastrada.`)
+          log(`  Não deu pra ler o anexo da linha ${info.damNumber || '(número desconhecido)'} — não marcando como já cadastrada.`, 'warning')
         }
       }
     }
@@ -2881,7 +2882,7 @@ async function goToNextListPage(page: Page, log?: LogFn): Promise<boolean> {
           (await el.getAttribute('aria-disabled').catch(() => null)) === 'true' ||
           (await el.getAttribute('disabled').catch(() => null)) !== null
         if (isDisabled) {
-          log?.(`  ℹ Controle de "próxima página" achado mas desabilitado — assumindo fim da lista.`)
+          log?.(`  Controle de "próxima página" achado mas desabilitado — assumindo fim da lista.`)
           return false
         }
         await el.click({ force: true }).catch(() => {})
@@ -2889,7 +2890,7 @@ async function goToNextListPage(page: Page, log?: LogFn): Promise<boolean> {
       }
     }
   }
-  log?.(`  ℹ Nenhum controle de "próxima página" encontrado nessa tela — lista provavelmente não usa paginação por botão (carrega tudo por rolagem).`)
+  log?.(`  Nenhum controle de "próxima página" encontrado nessa tela — lista provavelmente não usa paginação por botão (carrega tudo por rolagem).`)
   return false
 }
 
@@ -2926,7 +2927,7 @@ async function growVisibleRowsUntilStable(page: Page, log: LogFn): Promise<void>
       if (stableStreak >= 2) break // duas leituras seguidas sem crescer — acabou de carregar
     } else {
       if (lastCount !== -1) {
-        log(`  ℹ Lista cresceu ao rolar: ${lastCount} → ${count} linha(s).`)
+        log(`  Lista cresceu ao rolar: ${lastCount} → ${count} linha(s).`)
       }
       stableStreak = 0
     }
@@ -2960,7 +2961,7 @@ async function scanDamageEntriesTableByColumn(
     const found = await scanCurrentListPage(page, auditSet, log, stats, skipVideoAudit)
     if (found) {
       tableFound = true
-      log(`  ✓ Página ${pageNum} da lista lida (+${auditSet.size - before} entrada(s), total acumulado ${auditSet.size}).`)
+      log(`  Página ${pageNum} da lista lida (+${auditSet.size - before} entrada(s), total acumulado ${auditSet.size}).`, 'success')
     } else if (pageNum === 1) {
       break // não achou tabela nenhuma na primeira página, nem adianta tentar paginar
     }
@@ -2973,14 +2974,14 @@ async function scanDamageEntriesTableByColumn(
   }
 
   if (stats.blankImageCount > 0) {
-    log(`  ℹ ${stats.blankImageCount} entrada(s) "Blank Image" já cadastrada(s) (identificadas pela Damage Description "Empty entry").`)
+    log(`  ${stats.blankImageCount} entrada(s) "Blank Image" já cadastrada(s) (identificadas pela Damage Description "Empty entry").`)
   }
 
   return { auditSet, tableFound, blankImageCount: stats.blankImageCount }
 }
 
 export async function auditLiveDamageEntries(page: Page, log: LogFn, skipVideoAudit: boolean = false): Promise<LiveAuditResult> {
-  log(`🔍 Realizando auditoria ao vivo na tabela Damage Report Entries do ServiceNow...`)
+  log(`Realizando auditoria ao vivo na tabela Damage Report Entries do ServiceNow...`)
   const originalUrl = page.url()
   try {
     await page.waitForLoadState('domcontentloaded').catch(() => {})
@@ -3002,7 +3003,7 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn, skipVideoAu
     // volta pra URL original antes de tentar ler qualquer coisa.
     const errorPageText = await page.locator('body').textContent({ timeout: 2000 }).catch(() => '')
     if (errorPageText && /not allowed to access this page|page you requested was not found/i.test(errorPageText)) {
-      log(`  ⚠ Página atual é uma tela de erro/acesso negado — voltando pra URL original antes de auditar.`)
+      log(`  Página atual é uma tela de erro/acesso negado — voltando pra URL original antes de auditar.`, 'warning')
       await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
       await page.waitForTimeout(1500)
     }
@@ -3010,11 +3011,11 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn, skipVideoAu
     const { auditSet, tableFound, blankImageCount } = await scanDamageEntriesTableByColumn(page, log, skipVideoAudit)
 
     if (auditSet.size > 0) {
-      log(`✓ Auditoria ao vivo do ServiceNow concluída: ${auditSet.size} assinatura(s) de defeito já cadastrada(s) na tabela.`)
+      log(`Auditoria ao vivo do ServiceNow concluída: ${auditSet.size} assinatura(s) de defeito já cadastrada(s) na tabela.`, 'success')
     } else if (tableFound) {
-      log(`ℹ Auditoria ao vivo do ServiceNow concluída: a tabela foi encontrada e está vazia (nenhum defeito cadastrado ainda).`)
+      log(`Auditoria ao vivo do ServiceNow concluída: a tabela foi encontrada e está vazia (nenhum defeito cadastrado ainda).`)
     } else {
-      log(`⚠ Auditoria ao vivo NÃO encontrou a tabela 'Damage Report Entries' (não conseguiu navegar até a lista, ou as colunas têm nome diferente do esperado) — não dá pra confirmar o que já está cadastrado. Prosseguindo sem esse filtro (só o histórico local, se houver, é aplicado).`)
+      log(`Auditoria ao vivo NÃO encontrou a tabela 'Damage Report Entries' (não conseguiu navegar até a lista, ou as colunas têm nome diferente do esperado) — não dá pra confirmar o que já está cadastrado. Prosseguindo sem esse filtro (só o histórico local, se houver, é aplicado).`, 'warning')
     }
 
     // Volta pra página original do incidente — o resto da automação (clicar em Add
@@ -3026,7 +3027,7 @@ export async function auditLiveDamageEntries(page: Page, log: LogFn, skipVideoAu
 
     return { auditSet, tableFound, blankImageCount }
   } catch {
-    log(`⚠ Auditoria ao vivo falhou (exceção durante a varredura) — prosseguindo sem esse filtro.`)
+    log(`Auditoria ao vivo falhou (exceção durante a varredura) — prosseguindo sem esse filtro.`, 'warning')
     await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
     return { auditSet: new Set<string>(), tableFound: false, blankImageCount: 0 }
   }
@@ -3098,11 +3099,11 @@ async function ensureAuthenticatedPage(
   if (!(await isLoginPage(page))) return true
 
   if (headless) {
-    log(`⚠ Sessão do ServiceNow não está logada e o modo headless está ativo — não é possível fazer login interativo sem janela visível. Rode uma vez com headless desligado pra logar manualmente.`)
+    log(`Sessão do ServiceNow não está logada e o modo headless está ativo — não é possível fazer login interativo sem janela visível. Rode uma vez com headless desligado pra logar manualmente.`, 'warning')
     return false
   }
 
-  log(`🔐 Sessão do ServiceNow não está logada — abrindo a janela do navegador. Faça login manualmente; a automação espera até 5 minutos antes de desistir.`)
+  log(`Sessão do ServiceNow não está logada — abrindo a janela do navegador. Faça login manualmente; a automação espera até 5 minutos antes de desistir.`)
   await page.bringToFront().catch(() => {})
 
   const timeoutMs = 5 * 60 * 1000
@@ -3114,12 +3115,12 @@ async function ensureAuthenticatedPage(
       if (!page.url().includes(incidentUrl.split('?')[0])) {
         await page.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
       }
-      log(`✓ Login detectado — seguindo com a automação.`)
+      log(`Login detectado — seguindo com a automação.`, 'success')
       return true
     }
   }
 
-  log(`✗ Login não foi concluído em 5 minutos — abortando esta turbina.`)
+  log(`Login não foi concluído em 5 minutos — abortando esta turbina.`, 'error')
   return false
 }
 
@@ -3320,7 +3321,7 @@ async function openDamageEntryForm(
             await loc.first().scrollIntoViewIfNeeded().catch(() => {})
             await loc.first().click({ force: true, timeout: 3000 })
             clickedAdd = true
-            log(`  ✓ Clicado em 'Add Damage Entry'`)
+            log(`  Clicado em 'Add Damage Entry'`, 'success')
             break
           }
         } catch {
@@ -3334,7 +3335,7 @@ async function openDamageEntryForm(
   }
 
   if (!clickedAdd) {
-    log(`  ⚠ Tentando clique forçado no botão Add Damage Entry...`)
+    log(`  Tentando clique forçado no botão Add Damage Entry...`, 'warning')
     await targetPage
       .locator('button, a', { hasText: /add damage entry|create damage entry/i })
       .first()
@@ -3383,7 +3384,7 @@ async function openDamageEntryForm(
 
   // Se ainda assim não abriu o formulário e a tela continua no Inspection Report, tenta clicar novamente no botão Add Damage Entry
   if (!isFormReady) {
-    log(`  ⚠ Formulário não abriu na 1ª tentativa. Tentando clicar novamente em 'Add Damage Entry'...`)
+    log(`  Formulário não abriu na 1ª tentativa. Tentando clicar novamente em 'Add Damage Entry'...`, 'warning')
     const scopes = [formPage, ...formPage.frames()]
     for (const s of scopes) {
       const loc = s.locator('button, a', { hasText: /add damage entry|create damage entry/i }).first()
@@ -3403,7 +3404,7 @@ async function openDamageEntryForm(
   }
 
   if (!isFormReady) {
-    log(`  ⚠ O formulário de cadastro não abriu na aba de destino. Recarregando página do relatório...`)
+    log(`  O formulário de cadastro não abriu na aba de destino. Recarregando página do relatório...`, 'warning')
     await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
     return null
   }
@@ -3437,7 +3438,7 @@ async function verifyVideoAttached(
     }
     if (Date.now() - lastLog >= logEveryMs) {
       lastLog = Date.now()
-      log(`  ⏳ Ainda conferindo upload de "${expectedFilename}"... (${Math.round((Date.now() - start) / 1000)}s)`)
+      log(`  Ainda conferindo upload de "${expectedFilename}"... (${Math.round((Date.now() - start) / 1000)}s)`)
     }
     await formPage.waitForTimeout(pollIntervalMs).catch(() => {})
   }
@@ -3468,7 +3469,7 @@ export async function runSnowDamageAutomation(
     // Mapeia previamente todas as fotos da pasta local Fotos/ do Módulo 23
     const photosMap = options.localPhotosDir ? buildLocalPhotosMap(options.localPhotosDir) : new Map()
     if (photosMap.size > 0) {
-      log(`✓ Mapeamento prévio de fotos concluído: ${photosMap.size} conjunto(s) de fotos indexado(s).`)
+      log(`Mapeamento prévio de fotos concluído: ${photosMap.size} conjunto(s) de fotos indexado(s).`, 'success')
     }
 
     // Filtragem opcional por Pás selecionadas pelo usuário
@@ -3565,7 +3566,7 @@ export async function runSnowDamageAutomation(
       rows = rows.filter((r) => r.isBlankImage || !rowAlreadyInLiveTable(r, auditSet))
       const skippedLive = beforeLiveFilter - rows.length
       if (skippedLive > 0) {
-        log(`ℹ ${skippedLive} linha(s) já cadastrada(s) no ServiceNow (detectado ao vivo) foram ignoradas. (${rows.length} restante(s))`)
+        log(`${skippedLive} linha(s) já cadastrada(s) no ServiceNow (detectado ao vivo) foram ignoradas. (${rows.length} restante(s))`)
       }
 
       // Diagnóstico: pra cada linha de defeito normal (não Blank/vídeo) que sobrou pra
@@ -3574,7 +3575,7 @@ export async function runSnowDamageAutomation(
       // confirmar se bateu ou não, sem precisar adivinhar.
       for (const r of rows) {
         if (!r.isBlankImage && !isVideoRow(r)) {
-          log(`  🔎 [debug] Vai processar: ${r.bladeSerialNumber} | ${r.subComponent} | ${r.failureType} | DF ${r.dfDistanceStart} — chaves: ${damageRowAuditKeys(r).join(' | ')}`)
+          log(`  [debug] Vai processar: ${r.bladeSerialNumber} | ${r.subComponent} | ${r.failureType} | DF ${r.dfDistanceStart} — chaves: ${damageRowAuditKeys(r).join(' | ')}`)
         }
       }
     }
@@ -3596,7 +3597,7 @@ export async function runSnowDamageAutomation(
     })
     const skippedBlank = beforeBlankFilter - rows.length
     if (skippedBlank > 0) {
-      log(`ℹ ${skippedBlank} linha(s) "Blank Image" ignoradas — já existem ${blankImageCount} no ServiceNow, precisa de só mais ${blankImagesNeeded} pra completar as 5 exigidas.`)
+      log(`${skippedBlank} linha(s) "Blank Image" ignoradas — já existem ${blankImageCount} no ServiceNow, precisa de só mais ${blankImagesNeeded} pra completar as 5 exigidas.`)
     }
 
     // Fila em fases, na ordem pedida: 1) Defeitos normais, 2) Blank Images, 3) Vídeos.
@@ -3625,20 +3626,20 @@ export async function runSnowDamageAutomation(
       const missingVideos = videoRows.length
       const totalMissing = missingDefects + missingBlanks + missingVideos
 
-      log(`\n🔍 MODO AUDITORIA (dry run) — nada foi preenchido, só conferido.`)
+      log(`\nMODO AUDITORIA (dry run) — nada foi preenchido, só conferido.`)
       log(`  • Defeitos faltando: ${missingDefects}`)
       log(`  • Blank Images faltando: ${missingBlanks}`)
       log(`  • Vídeos faltando: ${missingVideos}`)
 
       if (totalMissing === 0) {
-        log(`✓ Nada faltando — tudo que está na planilha já foi encontrado no ServiceNow.`)
+        log(`Nada faltando — tudo que está na planilha já foi encontrado no ServiceNow.`, 'success')
       } else {
         for (const r of nonVideoRows) {
           const tag = r.isBlankImage ? 'Blank Image' : `${r.subComponent} | ${r.failureType}`
-          log(`  ⚠ FALTA: ${r.bladeSerialNumber} | ${tag} | DF ${r.dfDistanceStart}-${r.dfDistanceEnd}`)
+          log(`  FALTA: ${r.bladeSerialNumber} | ${tag} | DF ${r.dfDistanceStart}-${r.dfDistanceEnd}`, 'warning')
         }
         for (const r of videoRows) {
-          log(`  🎬 FALTA: ${r.bladeSerialNumber} | ${r.bladeSection || '?'} ${r.bladeArea || '?'} | Vídeo DF 45-50`)
+          log(`  FALTA: ${r.bladeSerialNumber} | ${r.bladeSection || '?'} ${r.bladeArea || '?'} | Vídeo DF 45-50`, 'warning')
         }
       }
 
@@ -3685,7 +3686,7 @@ export async function runSnowDamageAutomation(
 
       const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
       if (existsInSnow) {
-        log(`  ℹ [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
+        log(`  [SNOW Live Audit] ${prefix} já cadastrado na tabela do ServiceNow. Pulando...`)
         await targetPage.close().catch(() => {})
         return 'skip'
       }
@@ -3710,7 +3711,7 @@ export async function runSnowDamageAutomation(
 
       const videoPath = localPhotos.find((p) => isVideoFile(p))
       const expectedFilename = videoPath ? path.basename(videoPath) : ''
-      log(`  ✓ ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber}.`)
+      log(`  ${prefix} Preenchido e upload iniciado: ${row.bladeSerialNumber}.`, 'success')
       return { row, formPage, filler, expectedFilename, prefix }
     }
 
@@ -3768,7 +3769,7 @@ export async function runSnowDamageAutomation(
 
         const existsInSnow = await checkRowExistsInLiveTable(targetPage, row)
         if (existsInSnow) {
-          log(`  ℹ [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
+          log(`  [SNOW Live Audit] Entrada para ${row.bladeSerialNumber} (${row.subComponent} DF ${row.dfDistanceStart}-${row.dfDistanceEnd}) já cadastrada na tabela do ServiceNow. Pulando...`)
           if (!autoSubmit && context.pages().length > 1) {
             await targetPage.close().catch(() => {})
           }
@@ -3790,7 +3791,7 @@ export async function runSnowDamageAutomation(
         const filler = new DamageEntryFiller(formPage, (m) => log(`  ${prefix} ${m}`))
         await filler.fill(row, localPhotos, autoSubmit)
 
-        log(`✓ ${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`)
+        log(`${prefix} OK: ${row.bladeSerialNumber} — ${row.failureType}`, 'success')
 
         if (autoSubmit) {
           await formPage.waitForTimeout(2000)
@@ -3807,7 +3808,7 @@ export async function runSnowDamageAutomation(
             await formPage.goto(incidentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
           }
         } else {
-          log(`  ℹ Formulário mantido aberto na tela para revisão. Avançando para a próxima linha...`)
+          log(`  Formulário mantido aberto na tela para revisão. Avançando para a próxima linha...`)
         }
 
         return 'ok'
@@ -3826,7 +3827,7 @@ export async function runSnowDamageAutomation(
           }
           await formPage.close().catch(() => {})
           sharedAutoSubmitPage = null
-          log(`  ℹ Aba descartada por causa da falha — a próxima linha abre uma aba nova.`)
+          log(`  Aba descartada por causa da falha — a próxima linha abre uma aba nova.`)
         }
         return { error: err.message }
       }
@@ -3865,14 +3866,14 @@ export async function runSnowDamageAutomation(
       const recycleCount = new Map<string, number>()
       let bladesConcluded = 0
 
-      log(`🪶 [Flawless] ${totalBlades} pá(s) na fila — só avança pra próxima quando a atual estiver 100% completa (até ${MAX_RECYCLES} voltas na fila por pá).`)
+      log(`[Flawless] ${totalBlades} pá(s) na fila — só avança pra próxima quando a atual estiver 100% completa (até ${MAX_RECYCLES} voltas na fila por pá).`)
 
       while (queue.length > 0) {
         await checkpoint(log)
         const group = queue.shift()!
         const recycles = recycleCount.get(group.blade) ?? 0
         const roundTag = recycles > 0 ? ` (volta ${recycles}/${MAX_RECYCLES})` : ''
-        log(`🪶 [Flawless] Pá ${group.blade}${roundTag} — ${group.defectBlankRows.length} defeito(s)/blank(s) + ${group.videoRows.length} vídeo(s) pendente(s).`)
+        log(`[Flawless] Pá ${group.blade}${roundTag} — ${group.defectBlankRows.length} defeito(s)/blank(s) + ${group.videoRows.length} vídeo(s) pendente(s).`)
 
         // 1) Dispara o vídeo dessa pá primeiro, pra aproveitar o tempo de upload
         // durante o preenchimento dos defeitos dela (mesma ideia da Fase 0/1
@@ -3886,7 +3887,7 @@ export async function runSnowDamageAutomation(
             const result = await fillVideoTab(row, prefix)
             if (result !== 'skip') openVideoTabs.push(result)
           } catch (err: any) {
-            log(`  ✗ ${prefix} FALHOU ao preencher vídeo: ${err.message}`)
+            log(`  ${prefix} FALHOU ao preencher vídeo: ${err.message}`, 'error')
           }
         }
 
@@ -3895,7 +3896,7 @@ export async function runSnowDamageAutomation(
         let pendingDefects = group.defectBlankRows
         for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PASS && pendingDefects.length > 0; attempt++) {
           if (attempt > 1) {
-            log(`  🔁 [Flawless ${group.blade}] Tentativa ${attempt}/${MAX_ATTEMPTS_PER_PASS} — ${pendingDefects.length} item(ns) ainda pendente(s)...`)
+            log(`  [Flawless ${group.blade}] Tentativa ${attempt}/${MAX_ATTEMPTS_PER_PASS} — ${pendingDefects.length} item(ns) ainda pendente(s)...`)
           }
           const stillFailing: DamageReportRow[] = []
           for (let i = 0; i < pendingDefects.length; i++) {
@@ -3930,8 +3931,8 @@ export async function runSnowDamageAutomation(
                 // Conta como falha definitiva de vídeo já aqui, igual o modo
                 // clássico sempre fez, e deixa a aba aberta pra revisão manual.
                 videosFailed++
-                errors.push(`✗ [Flawless] Vídeo sem arquivo local encontrado (não retentado): ${tab.row.bladeSerialNumber} — ${tab.prefix}`)
-                log(`  ⚠ ${tab.prefix} Não foi possível identificar o nome do arquivo esperado — deixando aberta pra revisão manual, não vai retentar.`)
+                errors.push(`[Flawless] Vídeo sem arquivo local encontrado (não retentado): ${tab.row.bladeSerialNumber} — ${tab.prefix}`)
+                log(`  ${tab.prefix} Não foi possível identificar o nome do arquivo esperado — deixando aberta pra revisão manual, não vai retentar.`, 'warning')
                 continue
               }
               const confirmed = await verifyVideoAttached(tab.formPage, tab.expectedFilename, log)
@@ -3971,7 +3972,7 @@ export async function runSnowDamageAutomation(
         const stillPending = pendingDefects.length > 0 || pendingVideoRows.length > 0
         if (!stillPending) {
           bladesConcluded++
-          log(`  ✅ [Flawless] Pá ${group.blade} CONCLUÍDA — tudo preenchido e submetido (${bladesConcluded}/${totalBlades}).`)
+          log(`  [Flawless] Pá ${group.blade} CONCLUÍDA — tudo preenchido e submetido (${bladesConcluded}/${totalBlades}).`, 'success')
           continue
         }
 
@@ -3981,12 +3982,12 @@ export async function runSnowDamageAutomation(
           const missing = [
             ...pendingDefects.map(
               (r) =>
-                `✗ [Flawless] Defeito não confirmado após ${MAX_RECYCLES} volta(s) na fila: ${r.bladeSerialNumber} — ${r.failureType} (DF ${r.dfDistanceStart}-${r.dfDistanceEnd})`
+                `[Flawless] Defeito não confirmado após ${MAX_RECYCLES} volta(s) na fila: ${r.bladeSerialNumber} — ${r.failureType} (DF ${r.dfDistanceStart}-${r.dfDistanceEnd})`
             ),
-            ...pendingVideoRows.map((r) => `✗ [Flawless] Vídeo não confirmado após ${MAX_RECYCLES} volta(s) na fila: ${r.bladeSerialNumber}`)
+            ...pendingVideoRows.map((r) => `[Flawless] Vídeo não confirmado após ${MAX_RECYCLES} volta(s) na fila: ${r.bladeSerialNumber}`)
           ]
           errors.push(...missing)
-          log(`  ⛔ [Flawless] Pá ${group.blade} esgotou ${MAX_RECYCLES} voltas na fila com pendência — parando essa turbina e reportando (as próximas turbinas da fila não são afetadas).`)
+          log(`  [Flawless] Pá ${group.blade} esgotou ${MAX_RECYCLES} voltas na fila com pendência — parando essa turbina e reportando (as próximas turbinas da fila não são afetadas).`, 'error')
           return {
             success: false,
             processed,
@@ -4002,10 +4003,10 @@ export async function runSnowDamageAutomation(
         group.defectBlankRows = pendingDefects
         group.videoRows = pendingVideoRows
         queue.push(group)
-        log(`  🔁 [Flawless] Pá ${group.blade} volta pro final da fila (volta ${recycles + 1}/${MAX_RECYCLES}) — ${pendingDefects.length} defeito(s)/blank(s) + ${pendingVideoRows.length} vídeo(s) ainda pendente(s).`)
+        log(`  [Flawless] Pá ${group.blade} volta pro final da fila (volta ${recycles + 1}/${MAX_RECYCLES}) — ${pendingDefects.length} defeito(s)/blank(s) + ${pendingVideoRows.length} vídeo(s) ainda pendente(s).`)
       }
 
-      log(`✅ [Flawless] Todas as ${totalBlades} pá(s) concluídas — ${processed} defeito(s)/blank(s) ok, ${videosFilled} vídeo(s) ok.`)
+      log(`[Flawless] Todas as ${totalBlades} pá(s) concluídas — ${processed} defeito(s)/blank(s) ok, ${videosFilled} vídeo(s) ok.`, 'success')
       return { success: true, processed, failed, errors, videosFilled, videosFailed }
     }
 
@@ -4013,7 +4014,7 @@ export async function runSnowDamageAutomation(
     let videoOpenTabs: OpenVideoTab[] = []
 
     if (videoRows.length > 0) {
-      log(`🎬 ${videoRows.length} vídeo(s) — disparando upload de cada um antes dos defeitos, pra usar o tempo de preenchimento da Fase 1 como janela de upload.`)
+      log(`${videoRows.length} vídeo(s) — disparando upload de cada um antes dos defeitos, pra usar o tempo de preenchimento da Fase 1 como janela de upload.`)
       for (let vi = 0; vi < videoRows.length; vi++) {
         await checkpoint(log)
         const row = videoRows[vi]
@@ -4023,9 +4024,9 @@ export async function runSnowDamageAutomation(
           if (result !== 'skip') videoOpenTabs.push(result)
         } catch (err: any) {
           videosFailed++
-          const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
+          const msg = `${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
           errors.push(msg)
-          log(msg)
+          log(msg, 'error')
         }
       }
     }
@@ -4041,7 +4042,7 @@ export async function runSnowDamageAutomation(
 
     for (let round = 1; round <= MAX_ROUNDS && currentRoundRows.length > 0; round++) {
       if (round > 1) {
-        log(`🔁 Rodada ${round}/${MAX_ROUNDS} de retentativa — ${currentRoundRows.length} linha(s) que falharam antes...`)
+        log(`Rodada ${round}/${MAX_ROUNDS} de retentativa — ${currentRoundRows.length} linha(s) que falharam antes...`)
       }
       const failedThisRound: DamageReportRow[] = []
 
@@ -4057,7 +4058,7 @@ export async function runSnowDamageAutomation(
         if (outcome === 'ok') {
           processed++
         } else if (outcome !== 'skip') {
-          log(`✗ ${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${outcome.error}`)
+          log(`${prefix} FALHOU: ${row.bladeSerialNumber} — ${row.failureType}: ${outcome.error}`, 'error')
           failedThisRound.push(row)
         }
       } // fim do for de linhas da rodada
@@ -4070,10 +4071,10 @@ export async function runSnowDamageAutomation(
         // mesma linha como "falha" mais de uma vez entre rodadas).
         failed += failedThisRound.length
         for (const row of failedThisRound) {
-          errors.push(`✗ FALHOU definitivamente após ${round} tentativa(s): ${row.bladeSerialNumber} — ${row.failureType}`)
+          errors.push(`FALHOU definitivamente após ${round} tentativa(s): ${row.bladeSerialNumber} — ${row.failureType}`)
         }
         if (noProgress && round < MAX_ROUNDS) {
-          log(`⚠ Rodada ${round} não conseguiu reduzir o que falta (${failedThisRound.length} linha(s) continuam falhando) — parando de tentar, provavelmente é um problema persistente.`)
+          log(`Rodada ${round} não conseguiu reduzir o que falta (${failedThisRound.length} linha(s) continuam falhando) — parando de tentar, provavelmente é um problema persistente.`, 'warning')
         }
         break
       }
@@ -4081,7 +4082,7 @@ export async function runSnowDamageAutomation(
     }
 
     if (!autoSubmit) {
-      log(`ℹ Defeitos/Blanks concluídos! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
+      log(`Defeitos/Blanks concluídos! ${processed} formulário(s) preenchido(s) com sucesso e mantido(s) aberto(s) em abas/janelas para sua revisão final.`)
     }
 
     // ─── Fase 3: confere (e, se Submissão Automática, submete) os vídeos disparados
@@ -4094,7 +4095,7 @@ export async function runSnowDamageAutomation(
       // não acontece nesse modo — então não confere nada, só reporta quantos
       // foram disparados no início; as abas seguem abertas pra revisão manual.
       videosFilled = videoOpenTabs.length
-      log(`🎬 Vídeos: ${videosFilled} disparado(s) aguardando revisão manual, ${videosFailed} falha(s) ao preencher.`)
+      log(`Vídeos: ${videosFilled} disparado(s) aguardando revisão manual, ${videosFailed} falha(s) ao preencher.`)
     } else if (videoRows.length > 0 && autoSubmit) {
       // Submissão Automática: só vale a pena conferir o upload porque a
       // confirmação AUTORIZA o Submit — sem essa checagem o formulário submeteria
@@ -4103,13 +4104,13 @@ export async function runSnowDamageAutomation(
       // reprocessa a linha (reabre e repreenche do zero) até `MAX_VIDEO_ROUNDS`
       // rodadas — como o vídeo foi disparado bem antes (não logo antes da
       // checagem), a maioria já deve confirmar na 1ª rodada.
-      log(`🎬 Conferindo upload dos ${videoOpenTabs.length} vídeo(s) disparados no início — Submissão Automática: só submete quando confirmar.`)
+      log(`Conferindo upload dos ${videoOpenTabs.length} vídeo(s) disparados no início — Submissão Automática: só submete quando confirmar.`)
 
       let tabsToCheck = videoOpenTabs
 
       for (let round = 1; round <= MAX_VIDEO_ROUNDS && tabsToCheck.length > 0; round++) {
         if (round > 1) {
-          log(`🔁 Rodada ${round}/${MAX_VIDEO_ROUNDS} de vídeo — ${tabsToCheck.length} upload(s) não confirmado(s), reprocessando...`)
+          log(`Rodada ${round}/${MAX_VIDEO_ROUNDS} de vídeo — ${tabsToCheck.length} upload(s) não confirmado(s), reprocessando...`)
         }
 
         const failedThisRound: DamageReportRow[] = []
@@ -4119,12 +4120,12 @@ export async function runSnowDamageAutomation(
             // achado) — não dá pra confirmar o upload, então não submete; fica
             // aberta pra revisão manual em vez de forçar retentativa eterna.
             videosFailed++
-            log(`  ⚠ ${tab.prefix} Não foi possível identificar o nome do arquivo esperado — deixando aberta sem confirmar/submeter.`)
+            log(`  ${tab.prefix} Não foi possível identificar o nome do arquivo esperado — deixando aberta sem confirmar/submeter.`, 'warning')
             continue
           }
           const confirmed = await verifyVideoAttached(tab.formPage, tab.expectedFilename, log)
           if (!confirmed) {
-            log(`  ⚠ ${tab.prefix} Upload de "${tab.expectedFilename}" NÃO confirmado — descartando aba e reprocessando essa linha.`)
+            log(`  ${tab.prefix} Upload de "${tab.expectedFilename}" NÃO confirmado — descartando aba e reprocessando essa linha.`, 'warning')
             await tab.formPage.close().catch(() => {})
             failedThisRound.push(tab.row)
             continue
@@ -4133,12 +4134,12 @@ export async function runSnowDamageAutomation(
           try {
             await tab.filler.submitAndReadEntry()
             videosFilled++
-            log(`  ✓ ${tab.prefix} Upload confirmado e entrada submetida: "${tab.expectedFilename}".`)
+            log(`  ${tab.prefix} Upload confirmado e entrada submetida: "${tab.expectedFilename}".`, 'success')
             await tab.formPage.close().catch(() => {})
           } catch (err: any) {
             videosFailed++
-            errors.push(`✗ ${tab.prefix} Upload confirmado mas falhou ao submeter: ${tab.row.bladeSerialNumber}: ${err.message}`)
-            log(`  ✗ ${tab.prefix} Upload confirmado mas falhou ao submeter: ${err.message}`)
+            errors.push(`${tab.prefix} Upload confirmado mas falhou ao submeter: ${tab.row.bladeSerialNumber}: ${err.message}`)
+            log(`  ${tab.prefix} Upload confirmado mas falhou ao submeter: ${err.message}`, 'error')
           }
         }
 
@@ -4146,9 +4147,9 @@ export async function runSnowDamageAutomation(
         if (round === MAX_VIDEO_ROUNDS) {
           videosFailed += failedThisRound.length
           for (const row of failedThisRound) {
-            errors.push(`✗ Vídeo não confirmou upload após ${round} rodada(s): ${row.bladeSerialNumber}`)
+            errors.push(`Vídeo não confirmou upload após ${round} rodada(s): ${row.bladeSerialNumber}`)
           }
-          log(`⚠ ${failedThisRound.length} vídeo(s) não confirmaram upload mesmo após ${round} rodadas — reportando como falha, não vai tentar de novo.`)
+          log(`${failedThisRound.length} vídeo(s) não confirmaram upload mesmo após ${round} rodadas — reportando como falha, não vai tentar de novo.`, 'warning')
           break
         }
 
@@ -4163,22 +4164,22 @@ export async function runSnowDamageAutomation(
             if (result !== 'skip') reopened.push(result)
           } catch (err: any) {
             videosFailed++
-            const msg = `✗ ${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
+            const msg = `${prefix} FALHOU: ${row.bladeSerialNumber}: ${err.message}`
             errors.push(msg)
-            log(msg)
+            log(msg, 'error')
           }
         }
         tabsToCheck = reopened
       }
 
-      log(`🎬 Vídeos concluídos: ${videosFilled} submetido(s) automaticamente, ${videosFailed} falha(s).`)
+      log(`Vídeos concluídos: ${videosFilled} submetido(s) automaticamente, ${videosFailed} falha(s).`)
     }
 
     log(`Concluído: ${processed} ok, ${failed} falha(s) de ${nonVideoRows.length} defeito(s)/blank(s)${videoRows.length > 0 ? `; ${videosFilled} vídeo(s) ok, ${videosFailed} falha(s)` : ''}.`)
     return { success: true, processed, failed, errors, videosFilled, videosFailed }
   } catch (err: any) {
     if (err instanceof AutomationStoppedError) {
-      log(`⏹ Parado pelo usuário — ${processed} ok, ${failed} falha(s) até o momento.`)
+      log(`Parado pelo usuário — ${processed} ok, ${failed} falha(s) até o momento.`, 'warning')
       return { success: true, processed, failed, errors, videosFilled, videosFailed, stopped: true }
     }
     return { success: false, processed, failed, errors, error: err.message }

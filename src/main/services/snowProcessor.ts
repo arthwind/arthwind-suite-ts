@@ -511,25 +511,25 @@ export class SnowPhotoProcessor {
           pic1Buffer = result.pic1
           pic2Buffer = result.pic2
         } catch (err: any) {
-          log(`  ⚠ Erro ao marcar imagem (${baseName}): ${err.message}`, 'warning')
+          log(`  Erro ao marcar imagem (${baseName}): ${err.message}`, 'warning')
           pic1Buffer = imageBuffer
         }
       } else {
-        log(`  ⚠ Sem coordenadas — pic1 sem marcação: ${baseName}`, 'warning')
+        log(`  Sem coordenadas — pic1 sem marcação: ${baseName}`, 'warning')
       }
 
       if (pic1Buffer) {
         fs.writeFileSync(path.join(folder, `${baseName}_pic1.jpeg`), pic1Buffer)
-        log(`  ✓ pic1: ${baseName}_pic1.jpeg`, 'success')
+        log(`  pic1: ${baseName}_pic1.jpeg`, 'success')
       }
       if (pic2Buffer) {
         fs.writeFileSync(path.join(folder, `${baseName}_pic2.jpeg`), pic2Buffer)
-        log(`  ✓ pic2: ${baseName}_pic2.jpeg`, 'success')
+        log(`  pic2: ${baseName}_pic2.jpeg`, 'success')
       }
 
       return true
     } catch (err: any) {
-      log(`  ✗ Erro no download (${baseName}): ${err.message}`, 'error')
+      log(`  Erro no download (${baseName}): ${err.message}`, 'error')
       return false
     }
   }
@@ -1001,11 +1001,11 @@ export async function processSnowExcel(
         buffers[currentIdx] = await fetchImageBuffer(params.photoUrl)
         downloadedCount++
         sendProgress(downloadedCount, totalDownloads)
-        sendLog(`  ✓ Baixado (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)}`, 'success')
+        sendLog(`  Baixado (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)}`, 'success')
       } catch (err: any) {
         downloadedCount++
         sendProgress(downloadedCount, totalDownloads)
-        sendLog(`  ⚠ Falha no download (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)} - ${err.message}`, 'warning')
+        sendLog(`  Falha no download (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)} - ${err.message}`, 'warning')
       }
     }
   }
@@ -1055,7 +1055,7 @@ export async function processSnowExcel(
             pic1Buffer = result.pic1
             pic2Buffer = result.pic2
           } catch (err: any) {
-            sendLog(`  ⚠ Erro ao marcar imagem (${baseName}): ${err.message}`, 'warning')
+            sendLog(`  Erro ao marcar imagem (${baseName}): ${err.message}`, 'warning')
             pic1Buffer = buffer
           }
         }
@@ -1068,10 +1068,10 @@ export async function processSnowExcel(
         }
         photosOk++
         processedCount++
-        sendLog(`  ✓ Processado e salvo (${processedCount}/${totalDownloads}): ${pic1Name}`, 'success')
+        sendLog(`  Processado e salvo (${processedCount}/${totalDownloads}): ${pic1Name}`, 'success')
       } catch (err: any) {
         processedCount++
-        sendLog(`  ✗ Erro no processamento (${baseName}): ${err.message}`, 'error')
+        sendLog(`  Erro no processamento (${baseName}): ${err.message}`, 'error')
         photosSkipped++
       }
     }
