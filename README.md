@@ -1,121 +1,124 @@
-# Arthwind Suite (Electron) v1.6.0
+# Arthwind Suite (Electron + TypeScript)
 
-Plataforma integrada em Electron, React e TypeScript para automação de **S&R** (Sort & Remove) em inspeções de aerogeradores com drones DJI, processamento Horizon, operações Arthbot/Arthnex, automação SNOW e ferramentas de vídeo 360°. Otimiza o fluxo entre coleta de campo e plataformas de laudo: organiza fotos, corrige Z zerado, recupera fotos perdidas, separa pás misturadas, converte CSVs, empacota submissões e preenche formulários de dano automaticamente.
-
-**Evolução da Arthwind Suite original (Python + PyWebView) — mesma proposta, agora em Electron nativo, com o SNOW Processor/Automation como frente mais recente de desenvolvimento.**
-
-Desenvolvida para uso interno, com foco em precisão e velocidade. Modular, bilíngue (PT-BR/EN), com interface gráfica nativa via Electron + React.
+Enterprise desktop application built with Electron 39, React 19, and TypeScript for wind turbine inspection workflows, drone data processing (S&R), Horizon/Arthnex platform integrations, 360° video tooling, and autonomous ServiceNow (SNOW) damage reporting.
 
 ---
 
-## Status
+## 🌟 Overview
 
-- **Versão:** 1.6.0
-- **Interface:** GUI nativa (Electron + React)
-- **Uso principal:** Windows 10/11 64-bit
-- **Binário Windows:** instalador NSIS gerado por `npm run build:win` (`dist/arthwind-suite-ts-<versão>-setup.exe`)
-
----
-
-## Como usar (usuário final)
-
-1. Baixe/receba o instalador `arthwind-suite-ts-<versão>-setup.exe`
-2. Execute o instalador (one-click)
-3. A interface abre diretamente
-4. Selecione o módulo desejado na barra lateral agrupada por categoria
-5. Clique nos campos para selecionar arquivos/pastas
-6. Configure opções pertinentes e clique para executar
+Arthwind Suite automates the entire lifecycle between field data collection and customer reporting platforms:
+- **Image Processing & Drone S&R**: Sort & Remove sorting, EXIF GPS/altitude calibration, blade split handling, and lost photo recovery.
+- **Arthnex Cloud Platform Integration**: Google SSO, JWT authentication, workorder inspection retrieval, defect polygon rendering, and direct image upload.
+- **ServiceNow (SNOW) Full Automation**: Automated entry of wind turbine damages via Playwright, live DOM auditing, overnight batch queues, and XML-injected Daily Activity Report generation.
+- **360° Media Tooling**: MediaSDK/Insta360 equirectangular stitching, stabilization, and cloud syncing.
 
 ---
 
-## Módulos Principais
+## 🚀 Key Modules
 
-### Arthdrone (Fluxo S&R e Correções)
-- **1 — Organizar Imagens S&R:** Lê o CSV da plataforma e organiza as fotos em `OUTPUT/Blade/Region`.
-- **10 — Gerar CSV S&R via JSON:** Lê o JSON do drone e gera um CSV pronto pro Módulo 1, pulando o Image Uploader.
-- **2 — Processar JSON do Drone:** Lê o JSON do drone e gera CSVs padronizados pro Image Uploader.
-- **3 — Organizar Fotos via JSON:** Cria as pastas A/B/C e move as fotos brutas pro lugar exato baseado no mapa do JSON do drone.
-- **11 — Recriar CSV via GPS:** Reconstrói o CSV do Módulo 1 direto da pasta de fotos, suportando até três pás simultaneamente — define os lados manualmente quando o JSON está corrompido ou indisponível.
-- **6 — Dividir Voo (Blade Split):** Procura quebras de tempo longas (drone pousou/trocou bateria) e permite realocar a metade pra um novo Serial Number.
-- **7 — Restaurar Alturas (Z=0):** Lê um CSV da plataforma com erros esporádicos de Location=0 e recalcula só as fotos afetadas usando o GPS.
-- **8 — Recuperar Fotos Perdidas:** Escaneia o SD Card atrás de pulos de numeração sequencial e reconstrói os dados perdidos usando as fotos limítrofes como âncora via GPS real.
+### 1. Arthdrone (S&R Sorting & Drone Processing)
+- **Image S&R Organization**: Reads platform CSV/JSON files and organizes drone photos into `OUTPUT/Blade/Region` structures.
+- **Drone JSON to CSV**: Converts DJI drone flight telemetry into standardized CSV manifests.
+- **GPS-based CSV Reconstruction**: Rebuilds inspection metadata directly from raw photo folders using EXIF geolocation.
+- **Blade Flight Split**: Detects battery swaps/long pauses to split multi-blade flight sessions by serial numbers.
+- **Altitude (Z=0) Recovery**: Recalculates missing or zeroed elevation coordinates using neighboring anchor photos.
 
-### Arthbot (Inspeções Internas Arthnex)
-- **12 — Gerar CSV Arthnex (Upload Interno):** Gera o CSV no formato da plataforma pra inspeções internas — Turbine e Blade SN detectados pelo nome dos arquivos; aceita pasta de uma pá ou do aerogerador inteiro (1 CSV por pá automaticamente).
-- **13 — Padronizar GoPro para Arthnex:** Lê o padrão `{parque}--{blade}--{região}_{location}_...` do nome do arquivo e renomeia pro formato da plataforma.
-- **15 — Calibrar Z GoPro RAW:** Avança o Z em 500mm por posição, suporta fotos pareadas (0°/45°) até um limite, e gera as fotos renomeadas no padrão Arthnex prontas pra upload.
+### 2. Arthnex Operations & Internal Inspections
+- **Arthnex Uploader**: Multipart pre-signed S3 upload integration matching the official backend pipeline.
+- **GoPro Standardization**: Renames internal blade inspection photos following the `{windfarm}--{blade}--{region}_{location}` standard.
+- **GoPro RAW Z Calibration**: Increments elevation by 500mm intervals with 0°/45° paired photo angle alignment.
+- **Operation Events Synchronization**: Queries field flight operations to extract inspector technicians and inspection dates in real time.
 
-### Ferramentas
-- **19 — Arthnex Uploader:** Sobe fotos pro Arthnex via CSV + URLs pré-assinadas (mesma API do Image Uploader oficial), corrigindo o nome enviado ao servidor quando o caminho da foto tem subpastas.
-- **4 — Converter Delimitador de CSV:** Ajusta o separador (`;` → `,`) pra manter o arquivo compatível com o Excel.
-- **5 — Gerar Relatório de Altitudes:** Lê o EXIF das fotos brutas e gera a tabela milimétrica usando a raiz como Marco Zero.
-- **14 — Vincular Fotos a CSV:** Cruza fotos renomeadas pela plataforma com o CSV original, recriando as fotos originais prontas pro Módulo 1.
-- **17 — Auditar Planilha Smartsheet:** Audita a planilha do Smartsheet, cruza campanhas e acha escapes/recoletas de inspeção de pás.
-- **20 — Substituir Vídeos Insta360:** Varre a pasta de destino em busca de vídeos e os substitui pelos correspondentes (mesmo nome) exportados do Insta360 Studio.
-- **21 — Enviar Vídeos Arthfilm para o Drive:** Varre a pasta local da turbina e envia os vídeos de `360 watermark` pra subpasta `FINAL` equivalente no Google Drive.
+### 3. Client Reporting Platforms (SNOW & Horizon)
+- **SNOW Hub & Damage Entry Automation**:
+  - Live inspection synchronization from the Arthnex API.
+  - Automatic cross-referencing with customer INC control spreadsheets (e.g. Nordex Acciona).
+  - High-performance XML injection for official **Daily Activity Reports** via JSZip (zero ExcelJS freezes).
+  - Headless/Headed Playwright browser automation with multi-turbine overnight queuing, pause/resume controls, and live review tab management.
+- **Horizon Processor**: Naming validation and compliant ZIP package generation for Horizon platform submissions.
 
-### Plataforma do Cliente (Horizon & SNOW)
-- **16 — Horizon Processor:** Valida nomenclatura, verifica requisitos e gera o pacote ZIP pra submissão na plataforma Horizon.
-- **23 — SNOW Processor:** Converte planilhas de inspeção interna/externa pro formato padrão do ServiceNow, baixa as fotos e desenha os polígonos de dano.
-- **24 — Automação SNOW (Damage Entry):** Preenche automaticamente o formulário "Create Damage Report Entry" no ServiceNow a partir da planilha gerada pelo Módulo 23 — auditoria ao vivo pra nunca duplicar entrada, categorias independentes (Defeitos/Blanks/Vídeos), retentativa automática, fila overnight de múltiplas turbinas e Modo Auditoria (dry run). Documentação completa em [`docs/snow-automation.md`](docs/snow-automation.md); existe também uma versão standalone (CLI, sem Electron) pro time de dev.
-
-### Suporte
-- **9 — Documentação:** Guias interativos de como operar cada módulo sem erros.
+### 4. 360° Media & Video Processing
+- **Batch 360 Stitcher**: Equirectangular 2:1 projection stitching (5.7K resolution) with FlowState and DirectionLock hardware acceleration.
+- **Video Replacer & Cloud Sync**: Batch replaces raw camera files with stabilized exports and syncs to cloud storage.
 
 ---
 
-## Limitações e Red Flags
+## 💻 Tech Stack & Architecture
 
-- **GPS:** depende do EXIF das fotos DJI — neblina ou falha do drone pode zerar a altitude
-- **Match de nomes:** case-insensitive, mas extensões diferentes (ex: `.jpg` vs `.JPG`) podem causar falhas em alguns sistemas — verifique antes
-- **mm/px:** não calculado automaticamente — valor vem do JSON ou do CSV exportado da plataforma
-- **Automação SNOW (Módulo 24):** depende do DOM atual do ServiceNow — mudanças na plataforma do cliente podem quebrar seletores; sessão de login fica salva num perfil de navegador Chromium persistente local (`%APPDATA%/ArthwindSuite/snow_browser_profile`)
-- **Sharp (processamento de imagem):** binário nativo — instalação/build precisa ser feita na mesma plataforma/arquitetura de destino
-
----
-
-Ver [`docs/snow-automation.md`](docs/snow-automation.md) pro histórico detalhado de bugs e decisões de design do módulo SNOW.
+- **Runtime & Desktop Framework**: Electron 39, `electron-vite` (Vite 7), Node 22
+- **Frontend UI**: React 19, Vanilla CSS Design System, Three.js
+- **Automation & Headless Browser**: Playwright 1.62 (with automatic native Chrome / Edge system fallbacks)
+- **Image & Data Processing**: Sharp 0.35 (bundled cross-platform native win32/linux x64 binaries), JSZip, Exifr, ExcelJS
+- **Code Quality & Tooling**: Biome 1.9.4 (linter & formatter), Vitest (unit tests), TypeScript (strict mode)
+- **Package Manager**: `pnpm` (strictly required)
 
 ---
 
-Desenvolvido por Pedro Oliveira ([@aarchnemesis](https://github.com/aarchnemesis))
-Última atualização: Agosto 2026
+## 🛠️ Development & Building
 
-### ⚠️ Windows — Erro ao abrir em ambientes corporativos
+### Prerequisites
 
-Se ao executar o instalador aparecer aviso do SmartScreen ou erro de runtime, o Windows pode ter bloqueado os arquivos por segurança. Desbloqueie manualmente via PowerShell na pasta do instalador:
+- Node.js 22+
+- `pnpm` 10+ (`npm install -g pnpm`)
 
-```powershell
-Get-ChildItem -Recurse | Unblock-File
-```
-
-## Recommended IDE Setup
-
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
-
-## Project Setup (desenvolvimento)
-
-### Install
+### Installation
 
 ```bash
-$ npm install
+# Clone the repository
+git clone https://github.com/aarchnemesis/arthwind-suite-ts.git
+cd arthwind-suite-ts
+
+# Install dependencies via pnpm
+pnpm install
 ```
 
-### Development
+### Running in Development
 
 ```bash
-$ npm run dev
+pnpm dev
 ```
 
-### Build
+### Quality Checks (Required Before Committing)
 
 ```bash
-# For windows
-$ npm run build:win
+# Typecheck (Node + Web contexts)
+pnpm exec tsc --noEmit -p tsconfig.node.json --composite false && pnpm exec tsc --noEmit -p tsconfig.web.json --composite false
 
-# For macOS
-$ npm run build:mac
+# Linting & Formatting Check (Biome)
+pnpm exec biome check .
 
-# For Linux
-$ npm run build:linux
+# Auto-fix formatting / linting
+pnpm exec biome check --write .
+
+# Run Unit Tests
+pnpm exec vitest run
 ```
+
+### Building Distribution Packages
+
+```bash
+# Windows - Portable standalone executable (.exe - zero install)
+pnpm build:win:portable
+
+# Windows - NSIS Installer (.exe)
+pnpm build:win
+
+# Linux - Universal AppImage & directory
+pnpm build:linux
+
+# Linux - Arch Linux / Manjaro package (.pkg.tar.zst)
+pnpm build:pacman
+```
+
+---
+
+## 🔒 Governance & Contribution Rules
+
+Refer to [AGENTS.md](./AGENTS.md) for full coding conventions, branch protection rules (`main`, `homolog`, `development`), and AI agent guidelines.
+
+---
+
+## 📄 License
+
+Internal proprietary software developed for Arthwind / Arthnex operations.
+All rights reserved.
