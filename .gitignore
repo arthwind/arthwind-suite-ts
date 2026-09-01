@@ -1,6 +1,13 @@
 node_modules
 dist
 out
+build/arch-package/pkg
+build/arch-package/src
+build/arch-package/*.pkg.tar.*
+resources/mediasdk_linux
 .DS_Store
 .eslintcache
 *.log*
+.env.local
+.env.*.local
+*.pkg.tar.zst

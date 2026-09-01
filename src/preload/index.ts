@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { contextBridge, ipcRenderer } from 'electron'
 
 // Mapeamento dinâmico para evitar código repetitivo no Preload
 const ipcMethods = [
@@ -60,6 +60,22 @@ const ipcMethods = [
   'snow_automation_close',
   'snow_automation_get_blades',
   'snow_automation_run',
+  // Métodos de Integração Direta com o Arthnex
+  'arthnex_login',
+  'arthnex_verify_mfa',
+  'arthnex_google_login',
+  'arthnex_logout',
+  'arthnex_get_auth',
+  'arthnex_set_env',
+  'arthnex_set_token',
+  'arthnex_get_workorders',
+  'arthnex_get_turbines_blades',
+  'arthnex_get_defects',
+  'snow_process_arthnex',
+  'uploader_get_hierarchy',
+  'arthnex_get_operation_events',
+  'arthnex_get_technician_by_turbine',
+  // Métodos de Automação Avançada SNOW
   'snow_read_turbine_inc_list',
   'snow_inspection_report_run',
   'snow_full_automation_run',
@@ -73,9 +89,8 @@ const ipcMethods = [
   'snow_automation_open_logs_folder',
   'snow_windfarm_config_list',
   'snow_windfarm_config_save',
-  'snow_windfarm_config_delete'
+  'snow_windfarm_config_delete',
 ]
-
 
 const api: Record<string, (...args: any[]) => Promise<any>> = {}
 
@@ -96,7 +111,7 @@ const events = [
   'batch_stitch_log',
   'snow_progress',
   'snow_batch_status',
-  'snow_automation_log'
+  'snow_automation_log',
 ]
 
 for (const eventName of events) {

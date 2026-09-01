@@ -17,7 +17,10 @@ export async function enviarVideosDrive(
     sendLog(`Destino (Google Drive): ${driveTurbineFolder}`, 'info')
 
     if (dryRun) {
-      sendLog(`[DRY-RUN] Simulação ativa. Nenhum arquivo físico será alterado.`, 'warning')
+      sendLog(
+        `[DRY-RUN] Simulação ativa. Nenhum arquivo físico será alterado.`,
+        'warning'
+      )
     }
 
     if (!fs.existsSync(localTurbineFolder)) {
@@ -31,7 +34,11 @@ export async function enviarVideosDrive(
 
     // Helper para normalizar nomes de diretório (substitui underscores/traços por espaços e tira excessos)
     const normalize = (name: string) => {
-      return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+      return name
+        .replace(/[_-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
     }
 
     // 1. Escaneamento recursivo da pasta local à procura de pastas de output de
@@ -43,7 +50,10 @@ export async function enviarVideosDrive(
     // varredura silenciosamente considerava que não existia pasta nenhuma,
     // mesmo achando 1 pasta de vídeo de verdade no disco. Substring é bem mais
     // tolerante a variações e não deveria mais deixar passar uma pasta real.
-    sendLog(`Escaneando pasta local por diretórios de output de marca d'água...`, 'info')
+    sendLog(
+      `Escaneando pasta local por diretórios de output de marca d'água...`,
+      'info'
+    )
     const localWatermarkDirs: string[] = []
     const allDirNamesScanned: string[] = []
 
@@ -64,15 +74,24 @@ export async function enviarVideosDrive(
     }
 
     scanDir(localTurbineFolder)
-    sendLog(`Varredura finalizada. Localizada(s) ${localWatermarkDirs.length} pasta(s) de vídeos.`, 'info')
+    sendLog(
+      `Varredura finalizada. Localizada(s) ${localWatermarkDirs.length} pasta(s) de vídeos.`,
+      'info'
+    )
 
     if (localWatermarkDirs.length === 0) {
-      sendLog(`Nenhuma pasta de vídeos (ex: '360 WATERMARKED') foi encontrada na turbina local.`, 'warning')
+      sendLog(
+        `Nenhuma pasta de vídeos (ex: '360 WATERMARKED') foi encontrada na turbina local.`,
+        'warning'
+      )
       // Loga todas as pastas realmente encontradas na varredura — se uma pasta de
       // vídeo de verdade estiver aí com um nome diferente do esperado, fica óbvio
       // no log em vez de só "não achei nada".
       if (allDirNamesScanned.length > 0) {
-        sendLog(`   Pastas encontradas na varredura: ${allDirNamesScanned.join(', ')}`, 'warning')
+        sendLog(
+          `   Pastas encontradas na varredura: ${allDirNamesScanned.join(', ')}`,
+          'warning'
+        )
       }
       return { success: true, copiedFolders: 0, copiedFiles: 0 }
     }
@@ -90,7 +109,9 @@ export async function enviarVideosDrive(
       sendLog(`Processando vídeos da pá: ${localBladeName}...`, 'info')
 
       // Buscar a pasta correspondente da pá no Google Drive (ex: BLADE_0487 no PC -> BLADE 0487 ou BLADE_0487 no Drive)
-      const driveEntries = fs.readdirSync(driveTurbineFolder, { withFileTypes: true })
+      const driveEntries = fs.readdirSync(driveTurbineFolder, {
+        withFileTypes: true,
+      })
       let matchedDriveBladeName = ''
 
       for (const entry of driveEntries) {
@@ -112,14 +133,25 @@ export async function enviarVideosDrive(
       // copiada mesmo que seja a única, sem esperar as outras.
       if (!matchedDriveBladeName) {
         matchedDriveBladeName = localBladeName
-        sendLog(`⚠ Pasta da pá '${localBladeName}' não existe ainda no Drive — será criada.`, 'warning')
+        sendLog(
+          `⚠ Pasta da pá '${localBladeName}' não existe ainda no Drive — será criada.`,
+          'warning'
+        )
         if (!dryRun) {
-          fs.mkdirSync(path.join(driveTurbineFolder, matchedDriveBladeName), { recursive: true })
+          fs.mkdirSync(path.join(driveTurbineFolder, matchedDriveBladeName), {
+            recursive: true,
+          })
         }
       }
 
-      const driveBladePath = path.join(driveTurbineFolder, matchedDriveBladeName)
-      sendLog(`   Mapeado Pá: ${localBladeName} ➔ ${matchedDriveBladeName}`, 'info')
+      const driveBladePath = path.join(
+        driveTurbineFolder,
+        matchedDriveBladeName
+      )
+      sendLog(
+        `   Mapeado Pá: ${localBladeName} ➔ ${matchedDriveBladeName}`,
+        'info'
+      )
 
       // Ler subpastas de região de vídeo (CE_3h, CE_9h, LE_3h, LE_9h etc)
       const regions = fs.readdirSync(srcWatermark, { withFileTypes: true })
@@ -131,7 +163,11 @@ export async function enviarVideosDrive(
 
           // Detectar a faixa de horário (3h ou 9h)
           let timeSlot = 3
-          if (normRegName.includes('9h') || normRegName.includes('9hrs') || normRegName.includes('9 horas')) {
+          if (
+            normRegName.includes('9h') ||
+            normRegName.includes('9hrs') ||
+            normRegName.includes('9 horas')
+          ) {
             timeSlot = 9
           }
 
@@ -148,12 +184,22 @@ export async function enviarVideosDrive(
             if (entry.isDirectory()) {
               const normEntry = normalize(entry.name)
               if (timeSlot === 3) {
-                if (normEntry.includes('3h') || normEntry.includes('3hrs') || normEntry.includes('03hrs') || normEntry.includes('3 horas')) {
+                if (
+                  normEntry.includes('3h') ||
+                  normEntry.includes('3hrs') ||
+                  normEntry.includes('03hrs') ||
+                  normEntry.includes('3 horas')
+                ) {
                   matchedTimeFolderName = entry.name
                   break
                 }
               } else if (timeSlot === 9) {
-                if (normEntry.includes('9h') || normEntry.includes('9hrs') || normEntry.includes('09hrs') || normEntry.includes('9 horas')) {
+                if (
+                  normEntry.includes('9h') ||
+                  normEntry.includes('9hrs') ||
+                  normEntry.includes('09hrs') ||
+                  normEntry.includes('9 horas')
+                ) {
                   matchedTimeFolderName = entry.name
                   break
                 }
@@ -164,12 +210,23 @@ export async function enviarVideosDrive(
           // Se não encontrou a pasta de horário, usa uma nomenclatura padrão padrão do Drive
           if (!matchedTimeFolderName) {
             matchedTimeFolderName = timeSlot === 3 ? '360-03HRS' : '360-09HRS'
-            sendLog(`   ⚠ Pasta do horário (${timeSlot}h) não localizada no Drive. Será criada como: '${matchedTimeFolderName}'`, 'warning')
+            sendLog(
+              `   ⚠ Pasta do horário (${timeSlot}h) não localizada no Drive. Será criada como: '${matchedTimeFolderName}'`,
+              'warning'
+            )
           }
 
           // Montar o caminho final no Drive: Blade -> Horário -> FINAL -> Região
-          const destRegPath = path.join(driveBladePath, matchedTimeFolderName, 'FINAL', regName)
-          sendLog(`   ➡ Copiando: [${localBladeName} ➔ ${regName}] ➔ [${matchedTimeFolderName} ➔ FINAL ➔ ${regName}]`, 'info')
+          const destRegPath = path.join(
+            driveBladePath,
+            matchedTimeFolderName,
+            'FINAL',
+            regName
+          )
+          sendLog(
+            `   ➡ Copiando: [${localBladeName} ➔ ${regName}] ➔ [${matchedTimeFolderName} ➔ FINAL ➔ ${regName}]`,
+            'info'
+          )
 
           if (!dryRun) {
             fs.mkdirSync(destRegPath, { recursive: true })
@@ -191,7 +248,10 @@ export async function enviarVideosDrive(
                   sendLog(`      ✔ Copiado: ${file.name}`, 'success')
                   copiedFiles++
                 } catch (copyErr: any) {
-                  sendLog(`      ❌ Erro ao copiar ${file.name}: ${copyErr.message}`, 'error')
+                  sendLog(
+                    `      ❌ Erro ao copiar ${file.name}: ${copyErr.message}`,
+                    'error'
+                  )
                 }
               }
             }
@@ -205,12 +265,18 @@ export async function enviarVideosDrive(
     sendLog(`Total de regiões processadas: ${copiedFolders}`, 'success')
     sendLog(`Total de arquivos de vídeos copiados: ${copiedFiles}`, 'success')
     if (!dryRun) {
-      sendLog(`Nota: O Google Drive para Computador começará a subir os arquivos na nuvem automaticamente.`, 'info')
+      sendLog(
+        `Nota: O Google Drive para Computador começará a subir os arquivos na nuvem automaticamente.`,
+        'info'
+      )
     }
 
     return { success: true, copiedFolders, copiedFiles }
   } catch (err: any) {
-    sendLog(`Erro crítico ao processar o upload de vídeos: ${err.message}`, 'error')
+    sendLog(
+      `Erro crítico ao processar o upload de vídeos: ${err.message}`,
+      'error'
+    )
     return { success: false, error: err.message }
   }
 }

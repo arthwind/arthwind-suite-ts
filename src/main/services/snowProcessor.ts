@@ -1,12 +1,17 @@
 import fs from 'fs'
-import path from 'path'
-import https from 'https'
 import http from 'http'
+import https from 'https'
 import os from 'os'
+import path from 'path'
 import ExcelJS from 'exceljs'
 import sharp from 'sharp'
-import { equirectPolygonToPinhole, renderEquirectPinhole, equirectPolygonCenter } from './polygonUtils'
+import { ArthnexDefect, arthnexApi } from './arthnexApi'
 import { getBladeInfo } from './bladeSets'
+import {
+  equirectPolygonCenter,
+  equirectPolygonToPinhole,
+  renderEquirectPinhole,
+} from './polygonUtils'
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -37,35 +42,34 @@ interface DownloadParams {
   pic2Name?: string
 }
 
-
 // ─── MAPPINGS ────────────────────────────────────────────────────────────────
 
 export class SnowMappings {
   private static readonly FAILURE_TYPES: Record<string, string> = {
-    'Delamination':                        'Delamination',
-    'Crack in the bondline':               'Type of Failure is Missing',
-    'Sealant Damaged':                     'Type of Failure is Missing',
-    'Lightning Strike':                    'Burn Mark',
-    'Damaged Laminate':                    'Type of Failure is Missing',
-    'Wrinkle':                             'Waveness in the glassmaterial',
-    'Gap':                                 'Deviation Core Material',
+    Delamination: 'Delamination',
+    'Crack in the bondline': 'Type of Failure is Missing',
+    'Sealant Damaged': 'Type of Failure is Missing',
+    'Lightning Strike': 'Burn Mark',
+    'Damaged Laminate': 'Type of Failure is Missing',
+    Wrinkle: 'Waveness in the glassmaterial',
+    Gap: 'Deviation Core Material',
     // "Air Inclusion"/"Foreign Object" (singular) NÃO existem no dropdown real do SNOW
     // — o rótulo de verdade lá é plural ("Air inclusions"/"Foreign objects"), achado
     // comparando a planilha com a tabela ao vivo do ServiceNow (o robô nunca reconhecia
     // esses defeitos como já cadastrados por causa do "s" a mais/a menos).
-    'Bubbles':                             'Air inclusions',
-    'Semi dry glass':                      'Dry Laminate',
-    'Foreign Object':                      'Foreign objects',
-    'Bonding paste failure':               'Type of Failure is Missing',
-    'Core Material Damaged':               'Deviation Core Material',
-    'LPS Disconnected/Damaged':            'Type of Failure is Missing',
-    'Step':                                'Deviation Core Material',
-    'Crack in the Laminate Longitudinal':  'Crack, longitudinal',
-    'Crack in the Laminate Transversal':   'Crack, transversal',
-    'Missing Stud':                        'Type of Failure is Missing',
-    'Accessory Damaged':                   'Type of Failure is Missing',
-    'Improper Repair':                     'Type of Failure is Missing',
-    'Others':                              'Type of Failure is Missing',
+    Bubbles: 'Air inclusions',
+    'Semi dry glass': 'Dry Laminate',
+    'Foreign Object': 'Foreign objects',
+    'Bonding paste failure': 'Type of Failure is Missing',
+    'Core Material Damaged': 'Deviation Core Material',
+    'LPS Disconnected/Damaged': 'Type of Failure is Missing',
+    Step: 'Deviation Core Material',
+    'Crack in the Laminate Longitudinal': 'Crack, longitudinal',
+    'Crack in the Laminate Transversal': 'Crack, transversal',
+    'Missing Stud': 'Type of Failure is Missing',
+    'Accessory Damaged': 'Type of Failure is Missing',
+    'Improper Repair': 'Type of Failure is Missing',
+    Others: 'Type of Failure is Missing',
   }
 
   static getFailure(original: string, subComponent?: string): string {
@@ -74,19 +78,29 @@ export class SnowMappings {
 
     // Regra de negócio do cliente: "Air inclusion" com sub-componente "Web Laminate" não existe no SNOW.
     // Nesses casos, altera para "Type of Failure is Missing".
-    if (/web\s*laminate/i.test(sub) && (/bubbles/i.test(key) || /air\s*inclusion/i.test(key))) {
+    if (
+      /web\s*laminate/i.test(sub) &&
+      (/bubbles/i.test(key) || /air\s*inclusion/i.test(key))
+    ) {
       return 'Type of Failure is Missing'
     }
 
     return this.FAILURE_TYPES[key] ?? 'Type of Failure is Missing'
   }
 
-
-  static getDamageDescription(bladeSn: string | number, originalFailure: string, turbineSn?: string): string {
-    const rawSn = String(bladeSn || '').replace(/^B/i, '').replace(/^0+/, '')
+  static getDamageDescription(
+    bladeSn: string | number,
+    originalFailure: string,
+    turbineSn?: string
+  ): string {
+    const rawSn = String(bladeSn || '')
+      .replace(/^B/i, '')
+      .replace(/^0+/, '')
     const paddedBladeSn = rawSn ? rawSn.padStart(4, '0') : '0000'
     const info = getBladeInfo(bladeSn, turbineSn)
-    const setStr = info.setNumber ? String(info.setNumber).padStart(2, '0') : 'N/A'
+    const setStr = info.setNumber
+      ? String(info.setNumber).padStart(2, '0')
+      : 'N/A'
 
     return [
       'Inspection as per SN_241',
@@ -95,10 +109,6 @@ export class SnowMappings {
       originalFailure,
     ].join('\n')
   }
-
-
-
-
 
   static getProfile(section: string): number | string {
     const s = (section || '').trim().toUpperCase()
@@ -133,14 +143,17 @@ export class SnowMappings {
   // assim por um bom tempo; se algum dia aparecer um defeito real nessa
   // zona, basta adicionar a entrada aqui que a escolha por proximidade
   // passa a valer sozinha (pickNearestByAngle já suporta N âncoras).
-  private static readonly PD_ANCHORS: Record<string, { angleDeg: number; pd: number }[]> = {
+  private static readonly PD_ANCHORS: Record<
+    string,
+    { angleDeg: number; pd: number }[]
+  > = {
     'LE|SS': [
       { angleDeg: 101.9, pd: 10 },
       { angleDeg: 104.9, pd: 10 },
       { angleDeg: 140.7, pd: 10 },
-    ],                                          // única zona possível: →MG (10-15%)
-    'CE|SS': [{ angleDeg: 41.5, pd: 55 }],       // →TEG (55-60%); →MG (40-45%) ainda sem âncora
-    'CE|PS': [{ angleDeg: 79.4, pd: 55 }],       // única zona possível: →TEG (55-60%)
+    ], // única zona possível: →MG (10-15%)
+    'CE|SS': [{ angleDeg: 41.5, pd: 55 }], // →TEG (55-60%); →MG (40-45%) ainda sem âncora
+    'CE|PS': [{ angleDeg: 79.4, pd: 55 }], // única zona possível: →TEG (55-60%)
   }
 
   private static pickNearestByAngle(
@@ -151,7 +164,10 @@ export class SnowMappings {
     let bestDelta = Math.abs(angleDeg - best.angleDeg)
     for (const a of anchors.slice(1)) {
       const delta = Math.abs(angleDeg - a.angleDeg)
-      if (delta < bestDelta) { best = a; bestDelta = delta }
+      if (delta < bestDelta) {
+        best = a
+        bestDelta = delta
+      }
     }
     return best.pd
   }
@@ -232,7 +248,7 @@ export class SnowMappings {
   static getBladeArea(component: string, side: string): string {
     const c = (component || '').trim().toUpperCase()
     const s = (side || '').trim().toUpperCase()
-    if (c === 'TE WEB')   return 'Shear Web B'
+    if (c === 'TE WEB') return 'Shear Web B'
     if (c === 'MAIN WEB') return 'Shear Web A'
     if (s === 'SS') return 'SS'
     if (s === 'PS') return 'PS'
@@ -259,12 +275,15 @@ export class SnowMappings {
 
 // ─── PHOTO PROCESSOR ─────────────────────────────────────────────────────────
 
-interface PolygonPoint { x: number; y: number }
+interface PolygonPoint {
+  x: number
+  y: number
+}
 
 async function fetchImageBuffer(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http
-    const req = client.get(url, { timeout: 30000 }, (res) => {
+    const req = client.get(url, { timeout: 30000 }, res => {
       if (res.statusCode !== 200) {
         return reject(new Error(`HTTP ${res.statusCode}`))
       }
@@ -273,7 +292,10 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
       res.on('end', () => resolve(Buffer.concat(chunks)))
       res.on('error', reject)
     })
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout 30s')) })
+    req.on('timeout', () => {
+      req.destroy()
+      reject(new Error('Timeout 30s'))
+    })
     req.on('error', reject)
   })
 }
@@ -284,8 +306,11 @@ function parseCoordinates(json: string): PolygonPoint[] {
     const parsed = typeof json === 'string' ? JSON.parse(json) : json
     if (!Array.isArray(parsed)) return []
     return parsed.filter(
-      (p: any) => typeof p.x === 'number' && typeof p.y === 'number' &&
-                  isFinite(p.x) && isFinite(p.y)
+      (p: any) =>
+        typeof p.x === 'number' &&
+        typeof p.y === 'number' &&
+        isFinite(p.x) &&
+        isFinite(p.y)
     )
   } catch {
     return []
@@ -300,7 +325,8 @@ function buildPolygonOverlaySvg(
   strokeWidth: number,
   color = '#FF0000'
 ): Buffer {
-  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ') + ' Z'
+  const d =
+    points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ') + ' Z'
   const svg =
     `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">` +
     `<path d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" ` +
@@ -325,7 +351,7 @@ async function createMarkedImages(
   }
 
   const metadata = await sharp(imageBuffer).metadata()
-  const width  = metadata.width  ?? 0
+  const width = metadata.width ?? 0
   const height = metadata.height ?? 0
 
   if (width === 0 || height === 0) {
@@ -345,9 +371,9 @@ async function createMarkedImages(
     // (568.5×424.5 / 5568×4176) e distorcem polígonos pequenos ao serem
     // aplicados sobre uma equirretangular 2:1, então a coordenada é usada como
     // veio, só corrigindo o sinal de Y.
-    const scaledPanoPoints: PolygonPoint[] = points.map((p) => ({
+    const scaledPanoPoints: PolygonPoint[] = points.map(p => ({
       x: p.x,
-      y: Math.abs(p.y)
+      y: Math.abs(p.y),
     }))
 
     try {
@@ -355,9 +381,18 @@ async function createMarkedImages(
       const render = await renderEquirectPinhole(imageBuffer, scaledPanoPoints)
 
       // 2. Project 360 equirectangular polygon to pinhole camera space
-      const projectedPoints = equirectPolygonToPinhole(scaledPanoPoints, width, height)
+      const projectedPoints = equirectPolygonToPinhole(
+        scaledPanoPoints,
+        width,
+        height
+      )
       const closedPoints = [...projectedPoints, projectedPoints[0]]
-      const overlay = buildPolygonOverlaySvg(closedPoints, render.info.width, render.info.height, 18)
+      const overlay = buildPolygonOverlaySvg(
+        closedPoints,
+        render.info.width,
+        render.info.height,
+        18
+      )
 
       // pic1: Full 5568×4176 perspective pinhole view with red polygon drawn on top
       const pic1Buffer = await sharp(render.data, { raw: render.info })
@@ -372,7 +407,9 @@ async function createMarkedImages(
 
       return { pic1: pic1Buffer, pic2: pic2Buffer }
     } catch {
-      const pic1Buffer = await sharp(imageBuffer).jpeg({ quality: 85 }).toBuffer()
+      const pic1Buffer = await sharp(imageBuffer)
+        .jpeg({ quality: 85 })
+        .toBuffer()
       return { pic1: pic1Buffer, pic2: null }
     }
   } else {
@@ -401,32 +438,41 @@ async function createMarkedImages(
     if (isRootGoPro) {
       const sx = width / 5568.0
       const sy = height / 4176.0
-      pixelPoints = points.map((p) => ({
+      pixelPoints = points.map(p => ({
         x: Math.round(p.x * sx),
-        y: Math.round(Math.abs(p.y) * sy)
+        y: Math.round(Math.abs(p.y) * sy),
       }))
     } else {
       const SRC_W = 3840
       const SRC_H = 1920
-      const equirectPoints: PolygonPoint[] = points.map((p) => ({ x: p.x, y: Math.abs(p.y) }))
-      const projected = equirectPoints.length >= 3
-        ? equirectPolygonToPinhole(equirectPoints, SRC_W, SRC_H)
-        : equirectPoints
+      const equirectPoints: PolygonPoint[] = points.map(p => ({
+        x: p.x,
+        y: Math.abs(p.y),
+      }))
+      const projected =
+        equirectPoints.length >= 3
+          ? equirectPolygonToPinhole(equirectPoints, SRC_W, SRC_H)
+          : equirectPoints
 
       // equirectPolygonToPinhole trabalha sempre em espaço 5568×4176 — escala
       // pro tamanho real da foto baixada (quase sempre já é 5568×4176, mas nem
       // toda foto do export é).
       const sx = width / 5568.0
       const sy = height / 4176.0
-      pixelPoints = projected.map((p) => ({
+      pixelPoints = projected.map(p => ({
         x: Math.round(p.x * sx),
-        y: Math.round(p.y * sy)
+        y: Math.round(p.y * sy),
       }))
     }
 
     // pic1: FULL original photo showing all regions with red polygon drawn on top
     const thickness = Math.max(8, Math.round(width / 300))
-    const overlay = buildPolygonOverlaySvg([...pixelPoints, pixelPoints[0]], width, height, thickness)
+    const overlay = buildPolygonOverlaySvg(
+      [...pixelPoints, pixelPoints[0]],
+      width,
+      height,
+      thickness
+    )
 
     const pic1Buffer = await sharp(imageBuffer)
       .composite([{ input: overlay }])
@@ -434,8 +480,8 @@ async function createMarkedImages(
       .toBuffer()
 
     // pic2: Contextual ZOOM crop centered on defect bounding box
-    const xs   = pixelPoints.map((p) => p.x)
-    const ys   = pixelPoints.map((p) => p.y)
+    const xs = pixelPoints.map(p => p.x)
+    const ys = pixelPoints.map(p => p.y)
     const minX = Math.max(0, Math.min(...xs))
     const maxX = Math.min(width, Math.max(...xs))
     const minY = Math.max(0, Math.min(...ys))
@@ -447,16 +493,22 @@ async function createMarkedImages(
     const cx = Math.round((minX + maxX) / 2)
     const cy = Math.round((minY + maxY) / 2)
 
-    const cropW = Math.min(width,  Math.max(Math.round(width / 2.2), Math.round(polyW * 2.8)))
-    const cropH = Math.min(height, Math.max(Math.round(height / 2.2), Math.round(polyH * 2.8)))
+    const cropW = Math.min(
+      width,
+      Math.max(Math.round(width / 2.2), Math.round(polyW * 2.8))
+    )
+    const cropH = Math.min(
+      height,
+      Math.max(Math.round(height / 2.2), Math.round(polyH * 2.8))
+    )
 
     let left = Math.max(0, cx - Math.round(cropW / 2))
-    let top  = Math.max(0, cy - Math.round(cropH / 2))
+    let top = Math.max(0, cy - Math.round(cropH / 2))
 
-    if (left + cropW > width)  left = width - cropW
-    if (top  + cropH > height) top  = height - cropH
+    if (left + cropW > width) left = width - cropW
+    if (top + cropH > height) top = height - cropH
     left = Math.max(0, left)
-    top  = Math.max(0, top)
+    top = Math.max(0, top)
 
     const extractW = Math.min(cropW, width - left)
     const extractH = Math.min(cropH, height - top)
@@ -472,10 +524,21 @@ async function createMarkedImages(
 }
 
 export class SnowPhotoProcessor {
-  async download(params: DownloadParams, log: (msg: string, type?: string) => void): Promise<boolean> {
+  async download(
+    params: DownloadParams,
+    log: (msg: string, type?: string) => void
+  ): Promise<boolean> {
     const {
-      turbineSn, bladeSn, bladeSection, bladeArea,
-      dfStart, dfEnd, photoUrl, coordinatesJson, surface, photosFolder
+      turbineSn,
+      bladeSn,
+      bladeSection,
+      bladeArea,
+      dfStart,
+      dfEnd,
+      photoUrl,
+      coordinatesJson,
+      surface,
+      photosFolder,
     } = params
 
     if (!photoUrl) return false
@@ -486,7 +549,7 @@ export class SnowPhotoProcessor {
     const areaCode = SnowMappings.areaToFileCode(bladeArea)
     const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
     const bladeCode = `B${paddedBladeSn}`
-    
+
     let secCode = 'S1'
     if (bladeSection === 'Section 2') secCode = 'S2'
     else if (bladeSection === 'Section 3') secCode = 'S3'
@@ -507,11 +570,19 @@ export class SnowPhotoProcessor {
 
       if (coordinatesJson) {
         try {
-          const result = await createMarkedImages(imageBuffer, coordinatesJson, surface, dfStart)
+          const result = await createMarkedImages(
+            imageBuffer,
+            coordinatesJson,
+            surface,
+            dfStart
+          )
           pic1Buffer = result.pic1
           pic2Buffer = result.pic2
         } catch (err: any) {
-          log(`  Erro ao marcar imagem (${baseName}): ${err.message}`, 'warning')
+          log(
+            `  Erro ao marcar imagem (${baseName}): ${err.message}`,
+            'warning'
+          )
           pic1Buffer = imageBuffer
         }
       } else {
@@ -540,7 +611,7 @@ export class SnowPhotoProcessor {
       path.join(__dirname, '..', '..', 'resources', 'blank_image.jpg'),
       path.join(__dirname, '..', '..', '..', 'resources', 'blank_image.jpg'),
       path.join(__dirname, 'resources', 'blank_image.jpg'),
-      path.join(process.cwd(), 'resources', 'blank_image.jpg')
+      path.join(process.cwd(), 'resources', 'blank_image.jpg'),
     ]
 
     for (const src of pathsToCheck) {
@@ -561,11 +632,11 @@ export class SnowPhotoProcessor {
           width: 800,
           height: 600,
           channels: 3,
-          background: { r: 255, g: 255, b: 255 }
-        }
+          background: { r: 255, g: 255, b: 255 },
+        },
       })
-      .jpeg({ quality: 90 })
-      .toBuffer()
+        .jpeg({ quality: 90 })
+        .toBuffer()
 
       fs.writeFileSync(dst, whiteBuffer)
     } catch {
@@ -598,7 +669,7 @@ export class SnowPhotoProcessor {
         0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2, 0xe3,
         0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5,
         0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xff, 0xda, 0x00, 0x0c, 0x01, 0x01, 0x00,
-        0x00, 0x3f, 0x00, 0xfb, 0xd2, 0x8a, 0x28, 0xaf, 0xff, 0xd9
+        0x00, 0x3f, 0x00, 0xfb, 0xd2, 0x8a, 0x28, 0xaf, 0xff, 0xd9,
       ])
       fs.writeFileSync(dst, white1x1Jpg)
     }
@@ -634,7 +705,9 @@ const OUTPUT_HEADERS = [
 // confirma a submissão automática de uma linha. Vira a ÚNICA fonte de verdade de "essa
 // linha já foi submetida" — substitui o antigo histórico local em JSON
 // (snow_submitted_rows.json), que podia ficar desatualizado/discordar da planilha.
-const COLUMN_WIDTHS = [22, 28, 28, 55, 18, 18, 18, 18, 16, 18, 18, 18, 14, 50, 20, 15, 18]
+const COLUMN_WIDTHS = [
+  22, 28, 28, 55, 18, 18, 18, 18, 16, 18, 18, 18, 14, 50, 20, 15, 18,
+]
 
 function toFloat(val: any): number | null {
   if (val === null || val === undefined || val === '') return null
@@ -652,7 +725,9 @@ function getHeaderMap(worksheet: ExcelJS.Worksheet): Map<string, number> {
   const map = new Map<string, number>()
   const headerRow = worksheet.getRow(1)
   headerRow.eachCell((cell, colNum) => {
-    const val = String(cell.value ?? '').trim().toLowerCase()
+    const val = String(cell.value ?? '')
+      .trim()
+      .toLowerCase()
     if (val) map.set(val, colNum)
   })
   return map
@@ -663,7 +738,11 @@ function getCellByCol(row: ExcelJS.Row, col: number): any {
   return cell.value
 }
 
-function getCellByHeader(row: ExcelJS.Row, headerMap: Map<string, number>, header: string): any {
+function getCellByHeader(
+  row: ExcelJS.Row,
+  headerMap: Map<string, number>,
+  header: string
+): any {
   const col = headerMap.get(header.toLowerCase())
   if (!col) return null
   return row.getCell(col).value
@@ -698,7 +777,16 @@ export async function processSnowExcel(
   }
 
   if (!fs.existsSync(excelPath)) {
-    return { success: false, rowsProcessed: 0, rowsSkipped: 0, photosOk: 0, photosSkipped: 0, outputPath: '', photosFolder: '', error: `Arquivo não encontrado: ${excelPath}` }
+    return {
+      success: false,
+      rowsProcessed: 0,
+      rowsSkipped: 0,
+      photosOk: 0,
+      photosSkipped: 0,
+      outputPath: '',
+      photosFolder: '',
+      error: `Arquivo não encontrado: ${excelPath}`,
+    }
   }
 
   // Load input workbook to inspect first
@@ -707,7 +795,16 @@ export async function processSnowExcel(
   await inWb.xlsx.readFile(excelPath)
   const inWs = inWb.worksheets[0]
   if (!inWs) {
-    return { success: false, rowsProcessed: 0, rowsSkipped: 0, photosOk: 0, photosSkipped: 0, outputPath: '', photosFolder: '', error: 'Planilha vazia.' }
+    return {
+      success: false,
+      rowsProcessed: 0,
+      rowsSkipped: 0,
+      photosOk: 0,
+      photosSkipped: 0,
+      outputPath: '',
+      photosFolder: '',
+      error: 'Planilha vazia.',
+    }
   }
 
   const headerMap = getHeaderMap(inWs)
@@ -735,9 +832,12 @@ export async function processSnowExcel(
 
   // Resolve structured output paths
   const turbineOutputDir = path.join(outputDir, turbineId)
-  const outExcelPath = path.join(turbineOutputDir, `${turbineId}_Novo_Excel.xlsx`)
+  const outExcelPath = path.join(
+    turbineOutputDir,
+    `${turbineId}_Novo_Excel.xlsx`
+  )
   const photosFolder = path.join(turbineOutputDir, 'Fotos')
-  
+
   fs.mkdirSync(turbineOutputDir, { recursive: true })
   fs.mkdirSync(photosFolder, { recursive: true })
 
@@ -747,9 +847,13 @@ export async function processSnowExcel(
 
   // Write header row
   const headerRow = outWs.addRow(OUTPUT_HEADERS)
-  headerRow.eachCell((cell) => {
+  headerRow.eachCell(cell => {
     cell.font = { bold: true }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAD3' } }
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD9EAD3' },
+    }
   })
   OUTPUT_HEADERS.forEach((_, idx) => {
     outWs.getColumn(idx + 1).width = COLUMN_WIDTHS[idx]
@@ -765,24 +869,33 @@ export async function processSnowExcel(
   const nameCounts = new Map<string, number>()
 
   // Unique blades set for Video rows generation
-  const uniqueBladesMap = new Map<string, { fullBladeSerial: string; shortSn: string; setNumber: string }>()
+  const uniqueBladesMap = new Map<
+    string,
+    { fullBladeSerial: string; shortSn: string; setNumber: string }
+  >()
 
   for (let rowNum = 2; rowNum <= inWs.rowCount; rowNum++) {
     const row = inWs.getRow(rowNum)
 
-    const turbineSn   = String(getCellByCol(row, 8) ?? '').trim()   // col H
-    const bladeSn     = getCellByCol(row, 13)                         // col M
-    const section     = String(getCellByCol(row, 17) ?? '').trim()   // col Q
-    const side        = String(getCellByCol(row, 18) ?? '').trim()   // col R
-    const component   = String(getCellByCol(row, 19) ?? '').trim()   // col S
-    const photoLink   = String(getCellByCol(row, 20) ?? '').trim()   // col T
-    const poi         = getCellByCol(row, 21)                         // col U
-    const origFail    = String(getCellByCol(row, 22) ?? '').trim()   // col V
-    const severityRaw = getCellByCol(row, 24)                        // col X
-    const dfStartRaw  = getCellByCol(row, 25)                         // col Y
-    const sizeMmRaw   = getCellByCol(row, 26)                         // col Z
-    const polygonRaw  = getCellByHeader(row, headerMap, 'Polygon Data/Coordinates')
-    const surface     = String(getCellByHeader(row, headerMap, 'Surface') ?? '').trim()
+    const turbineSn = String(getCellByCol(row, 8) ?? '').trim() // col H
+    const bladeSn = getCellByCol(row, 13) // col M
+    const section = String(getCellByCol(row, 17) ?? '').trim() // col Q
+    const side = String(getCellByCol(row, 18) ?? '').trim() // col R
+    const component = String(getCellByCol(row, 19) ?? '').trim() // col S
+    const photoLink = String(getCellByCol(row, 20) ?? '').trim() // col T
+    const poi = getCellByCol(row, 21) // col U
+    const origFail = String(getCellByCol(row, 22) ?? '').trim() // col V
+    const severityRaw = getCellByCol(row, 24) // col X
+    const dfStartRaw = getCellByCol(row, 25) // col Y
+    const sizeMmRaw = getCellByCol(row, 26) // col Z
+    const polygonRaw = getCellByHeader(
+      row,
+      headerMap,
+      'Polygon Data/Coordinates'
+    )
+    const surface = String(
+      getCellByHeader(row, headerMap, 'Surface') ?? ''
+    ).trim()
 
     // Filter: severity must be 1–5
     const severity = toFloat(severityRaw)
@@ -792,69 +905,83 @@ export async function processSnowExcel(
     }
 
     // Filter: blade_sn must exist
-    if (bladeSn === null || bladeSn === undefined || String(bladeSn).trim() === '') {
+    if (
+      bladeSn === null ||
+      bladeSn === undefined ||
+      String(bladeSn).trim() === ''
+    ) {
       rowsSkipped++
       continue
     }
 
     const dfStart = round1(toFloat(dfStartRaw) ?? 0)
-    const sizeMm  = toFloat(sizeMmRaw) ?? 0
+    const sizeMm = toFloat(sizeMmRaw) ?? 0
 
-    const subComponent  = SnowMappings.getSubComponent(component) // Dynamic component mapping!
-    const failureType   = SnowMappings.getFailure(origFail, subComponent)
-    const damageDesc    = SnowMappings.getDamageDescription(bladeSn, origFail, turbineSn)
-    const dfEnd         = SnowMappings.getDfEnd(dfStart, sizeMm)
-    const profileDepth  = SnowMappings.getProfileFromCoordinates(
-      section, side, component, polygonRaw ? String(polygonRaw) : '', dfStart
+    const subComponent = SnowMappings.getSubComponent(component) // Dynamic component mapping!
+    const failureType = SnowMappings.getFailure(origFail, subComponent)
+    const damageDesc = SnowMappings.getDamageDescription(
+      bladeSn,
+      origFail,
+      turbineSn
     )
-    const bladeSection  = SnowMappings.getBladeSection(section)
-    const bladeSubsec   = SnowMappings.getBladeSubsection(component)
-    const bladeArea     = SnowMappings.getBladeArea(component, side)
+    const dfEnd = SnowMappings.getDfEnd(dfStart, sizeMm)
+    const profileDepth = SnowMappings.getProfileFromCoordinates(
+      section,
+      side,
+      component,
+      polygonRaw ? String(polygonRaw) : '',
+      dfStart
+    )
+    const bladeSection = SnowMappings.getBladeSection(section)
+    const bladeSubsec = SnowMappings.getBladeSubsection(component)
+    const bladeArea = SnowMappings.getBladeArea(component, side)
 
     const bladeInfo = getBladeInfo(bladeSn, turbineSn)
     const fullBladeSerial = bladeInfo.serial || String(bladeSn)
     const paddedBladeSn = String(bladeSn).replace(/^B/i, '').padStart(4, '0')
-    const setNumberStr = bladeInfo.setNumber ? String(bladeInfo.setNumber).padStart(2, '0') : '00'
+    const setNumberStr = bladeInfo.setNumber
+      ? String(bladeInfo.setNumber).padStart(2, '0')
+      : '00'
 
     if (!uniqueBladesMap.has(paddedBladeSn)) {
       uniqueBladesMap.set(paddedBladeSn, {
         fullBladeSerial,
         shortSn: paddedBladeSn,
-        setNumber: setNumberStr
+        setNumber: setNumberStr,
       })
     }
 
     const dfStartStr = dfStart.toFixed(1)
-    const dfEndStr   = dfEnd.toFixed(1)
+    const dfEndStr = dfEnd.toFixed(1)
 
     // Add row to excel
     const newRow = outWs.addRow([
-      fullBladeSerial,           // A — Blade serial number (13 dígitos se disponível)
-      subComponent,              // B — Sub Component
-      failureType,               // C — Failure Type
-      damageDesc,                // D — Damage Description
-      dfStartStr,                // E — DF distance Start (string formatada com ponto)
-      dfEndStr,                  // F — DF distance End (string formatada com ponto)
+      fullBladeSerial, // A — Blade serial number (13 dígitos se disponível)
+      subComponent, // B — Sub Component
+      failureType, // C — Failure Type
+      damageDesc, // D — Damage Description
+      dfStartStr, // E — DF distance Start (string formatada com ponto)
+      dfEndStr, // F — DF distance End (string formatada com ponto)
 
-      profileDepth,              // G — Profile Depth Start
-      profileDepth,              // H — Profile Depth End (same value)
-      'Inside',                  // I — Inside/Outside
-      bladeSection,              // J — Blade section
-      bladeSubsec,               // K — Blade sub-section
-      bladeArea,                 // L — Blade area
-      sizeMm,                    // M — Size mm
-      photoLink || null,         // N — Link das fotos
-      turbineSn,                 // O — Turbine SN
-      poi ?? null,               // P — POI
+      profileDepth, // G — Profile Depth Start
+      profileDepth, // H — Profile Depth End (same value)
+      'Inside', // I — Inside/Outside
+      bladeSection, // J — Blade section
+      bladeSubsec, // K — Blade sub-section
+      bladeArea, // L — Blade area
+      sizeMm, // M — Size mm
+      photoLink || null, // N — Link das fotos
+      turbineSn, // O — Turbine SN
+      poi ?? null, // P — POI
     ])
 
     // Apply soft red highlight if it's Delamination >= 45m
     if (SnowMappings.shouldHighlight(failureType, dfStart)) {
-      newRow.eachCell((cell) => {
+      newRow.eachCell(cell => {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: 'FFFFC7C7' } // Light soft red highlight
+          fgColor: { argb: 'FFFFC7C7' }, // Light soft red highlight
         }
       })
     }
@@ -887,7 +1014,6 @@ export async function processSnowExcel(
       const pic1Name = `${baseName}_pic${pic1Index}.jpeg`
       const pic2Name = `${baseName}_pic${pic2Index}.jpeg`
 
-
       photoDownloadQueue.push({
         turbineSn,
         bladeSn: String(bladeSn),
@@ -917,7 +1043,7 @@ export async function processSnowExcel(
     { sec: 'Section 1', area: 'PS', secCode: 'S1', areaCode: 'PS' },
     { sec: 'Section 1', area: 'SS', secCode: 'S1', areaCode: 'SS' },
     { sec: 'Section 2', area: 'PS', secCode: 'S2', areaCode: 'PS' },
-    { sec: 'Section 2', area: 'SS', secCode: 'S2', areaCode: 'SS' }
+    { sec: 'Section 2', area: 'SS', secCode: 'S2', areaCode: 'SS' },
   ]
 
   for (const [, bInfo] of uniqueBladesMap) {
@@ -925,30 +1051,29 @@ export async function processSnowExcel(
       'Inspection as per SN_241',
       `Blade: S/N${bInfo.shortSn} Set ${bInfo.setNumber}`,
       'Inspection number: 1',
-      'Type of Failure is Missing'
+      'Type of Failure is Missing',
     ].join('\n')
 
     for (const v of videoVariants) {
       const videoFileName = `B${bInfo.shortSn}_${v.secCode}_${v.areaCode}_DF45_DF50.mp4`
 
-
       outWs.addRow([
-        bInfo.fullBladeSerial,         // A — Blade serial number
-        'Blade Inside - Shell',        // B — Sub Component
-        'Type of Failure is Missing',  // C — Failure Type
-        videoDamageDesc,               // D — Damage Description
-        45,                            // E — DF distance Start (STRICTLY 45)
-        50,                            // F — DF distance End (STRICTLY 50)
-        0,                             // G — Profile Depth Start
-        0,                             // H — Profile Depth End
-        'Inside',                      // I — Inside/Outside
-        v.sec,                         // J — Blade section ("Section 1" / "Section 2")
-        'Shell',                       // K — Blade sub-section
-        v.area,                        // L — Blade area ("PS" / "SS")
-        0,                             // M — Size mm
-        videoFileName,                 // N — Video filename requirement
-        null,                          // O — Turbine SN
-        null                           // P — POI
+        bInfo.fullBladeSerial, // A — Blade serial number
+        'Blade Inside - Shell', // B — Sub Component
+        'Type of Failure is Missing', // C — Failure Type
+        videoDamageDesc, // D — Damage Description
+        45, // E — DF distance Start (STRICTLY 45)
+        50, // F — DF distance End (STRICTLY 50)
+        0, // G — Profile Depth Start
+        0, // H — Profile Depth End
+        'Inside', // I — Inside/Outside
+        v.sec, // J — Blade section ("Section 1" / "Section 2")
+        'Shell', // K — Blade sub-section
+        v.area, // L — Blade area ("PS" / "SS")
+        0, // M — Size mm
+        videoFileName, // N — Video filename requirement
+        null, // O — Turbine SN
+        null, // P — POI
       ])
     }
   }
@@ -956,26 +1081,24 @@ export async function processSnowExcel(
   // Add 5 blank image rows
   for (let i = 0; i < 5; i++) {
     outWs.addRow([
-      'Blank Image',                    // A
-      'Blade Inside - Shell',           // B
-      'Type of Failure is Missing',     // C
-      'Empty entry',                    // D
-      1,                                // E
-      1,                                // F
-      1,                                // G
-      1,                                // H
-      'Inside',                         // I
-      'Section 1',                      // J
-      'Shell',                          // K
-      'SS',                             // L
-      0,                                // M
-      null,                             // N
+      'Blank Image', // A
+      'Blade Inside - Shell', // B
+      'Type of Failure is Missing', // C
+      'Empty entry', // D
+      1, // E
+      1, // F
+      1, // G
+      1, // H
+      'Inside', // I
+      'Section 1', // J
+      'Shell', // K
+      'SS', // L
+      0, // M
+      null, // N
       i === 0 ? BLANK_TURBINE_SN : null, // O
-      null,                             // P
+      null, // P
     ])
   }
-
-
 
   // Save the Excel file
   sendLog(`Gravando planilha em: ${path.basename(outExcelPath)}...`)
@@ -1001,11 +1124,17 @@ export async function processSnowExcel(
         buffers[currentIdx] = await fetchImageBuffer(params.photoUrl)
         downloadedCount++
         sendProgress(downloadedCount, totalDownloads)
-        sendLog(`  Baixado (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)}`, 'success')
+        sendLog(
+          `  ✓ Baixado (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)}`,
+          'success'
+        )
       } catch (err: any) {
         downloadedCount++
         sendProgress(downloadedCount, totalDownloads)
-        sendLog(`  Falha no download (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)} - ${err.message}`, 'warning')
+        sendLog(
+          `  ⚠ Falha no download (${downloadedCount}/${totalDownloads}): ${params.photoUrl.substring(params.photoUrl.lastIndexOf('/') + 1)} - ${err.message}`,
+          'warning'
+        )
       }
     }
   }
@@ -1038,10 +1167,16 @@ export async function processSnowExcel(
         continue
       }
 
-      const folder = path.join(params.photosFolder, String(params.turbineSn), String(params.bladeSn))
+      const folder = path.join(
+        params.photosFolder,
+        String(params.turbineSn),
+        String(params.bladeSn)
+      )
       fs.mkdirSync(folder, { recursive: true })
 
-      const baseName = params.baseName || `B${String(params.bladeSn).padStart(4, '0')}_DF${params.dfStart}-${params.dfEnd}`
+      const baseName =
+        params.baseName ||
+        `B${String(params.bladeSn).padStart(4, '0')}_DF${params.dfStart}-${params.dfEnd}`
       const pic1Name = params.pic1Name || `${baseName}_pic1.jpeg`
       const pic2Name = params.pic2Name || `${baseName}_pic2.jpeg`
 
@@ -1051,11 +1186,19 @@ export async function processSnowExcel(
 
         if (params.coordinatesJson) {
           try {
-            const result = await createMarkedImages(buffer, params.coordinatesJson, params.surface, params.dfStart)
+            const result = await createMarkedImages(
+              buffer,
+              params.coordinatesJson,
+              params.surface,
+              params.dfStart
+            )
             pic1Buffer = result.pic1
             pic2Buffer = result.pic2
           } catch (err: any) {
-            sendLog(`  Erro ao marcar imagem (${baseName}): ${err.message}`, 'warning')
+            sendLog(
+              `  Erro ao marcar imagem (${baseName}): ${err.message}`,
+              'warning'
+            )
             pic1Buffer = buffer
           }
         }
@@ -1068,15 +1211,20 @@ export async function processSnowExcel(
         }
         photosOk++
         processedCount++
-        sendLog(`  Processado e salvo (${processedCount}/${totalDownloads}): ${pic1Name}`, 'success')
+        sendLog(
+          `  ✓ Processado e salvo (${processedCount}/${totalDownloads}): ${pic1Name}`,
+          'success'
+        )
       } catch (err: any) {
         processedCount++
-        sendLog(`  Erro no processamento (${baseName}): ${err.message}`, 'error')
+        sendLog(
+          `  Erro no processamento (${baseName}): ${err.message}`,
+          'error'
+        )
         photosSkipped++
       }
     }
   }
-
 
   const processWorkers: Promise<void>[] = []
   for (let w = 0; w < Math.min(PROCESS_CONCURRENCY, totalDownloads); w++) {
@@ -1084,7 +1232,10 @@ export async function processSnowExcel(
   }
   await Promise.all(processWorkers)
 
-  sendLog(`Planilha ${turbineId} finalizada! Linhas: ${rowsProcessed} processadas, ${rowsSkipped} ignoradas. Fotos: ${photosOk} OK, ${photosSkipped} puladas.`, 'success')
+  sendLog(
+    `Planilha ${turbineId} finalizada! Linhas: ${rowsProcessed} processadas, ${rowsSkipped} ignoradas. Fotos: ${photosOk} OK, ${photosSkipped} puladas.`,
+    'success'
+  )
 
   return {
     success: true,
@@ -1112,20 +1263,29 @@ export async function processSnowExcelBatch(
     if (sender) sender.send('snow_batch_status', { current, total })
   }
 
-  sendLog(`Iniciando processamento em lote para ${excelPaths.length} planilhas...`, 'info')
+  sendLog(
+    `Iniciando processamento em lote para ${excelPaths.length} planilhas...`,
+    'info'
+  )
   sendBatchStatus(0, excelPaths.length)
-  
+
   const results: SnowProcessResult[] = []
-  
+
   for (let i = 0; i < excelPaths.length; i++) {
     const excelPath = excelPaths[i]
-    sendLog(`[Batch ${i+1}/${excelPaths.length}] Processando arquivo: ${path.basename(excelPath)}...`, 'info')
-    
+    sendLog(
+      `[Batch ${i + 1}/${excelPaths.length}] Processando arquivo: ${path.basename(excelPath)}...`,
+      'info'
+    )
+
     try {
       const res = await processSnowExcel(excelPath, outputDir, sender)
       results.push(res)
     } catch (e: any) {
-      sendLog(`[Batch ${i+1}/${excelPaths.length}] Falha no arquivo ${path.basename(excelPath)}: ${e.message}`, 'error')
+      sendLog(
+        `[Batch ${i + 1}/${excelPaths.length}] Falha no arquivo ${path.basename(excelPath)}: ${e.message}`,
+        'error'
+      )
       results.push({
         success: false,
         rowsProcessed: 0,
@@ -1134,13 +1294,394 @@ export async function processSnowExcelBatch(
         photosSkipped: 0,
         outputPath: '',
         photosFolder: '',
-        error: e.message
+        error: e.message,
       })
     }
-    
+
     sendBatchStatus(i + 1, excelPaths.length)
   }
-  
-  sendLog(`Processamento em lote finalizado. Total planilhas: ${excelPaths.length}.`, 'success')
+
+  sendLog(
+    `Processamento em lote finalizado. Total planilhas: ${excelPaths.length}.`,
+    'success'
+  )
   return { success: true, results }
+}
+
+export interface ProcessSnowFromArthnexParams {
+  workorderId: string
+  windfarmId: number
+  turbineId: number
+  turbineSn: string
+  blades: { windbladeId: number; bladeSn: string; bladeLetter?: string }[]
+  outputDir: string
+  sender?: Electron.WebContents
+}
+
+/**
+ * Processa defeitos auditados diretamente do banco/API do Arthnex e gera
+ * a estrutura padrão para o ServiceNow (SNOW) sem necessidade de planilha intermediária.
+ */
+export async function processSnowFromArthnex(
+  params: ProcessSnowFromArthnexParams
+): Promise<SnowProcessResult> {
+  const {
+    workorderId,
+    windfarmId,
+    turbineId,
+    turbineSn,
+    blades,
+    outputDir,
+    sender,
+  } = params
+
+  const sendLog = (message: string, type = 'info') => {
+    if (sender) sender.send('snow_progress', { message, type })
+  }
+
+  const normalizedTurbineId = getNormalizedTurbineId(
+    turbineSn || `WTG_${turbineId}`
+  )
+  sendLog(
+    `Iniciando processamento do Arthnex para a Turbina: ${normalizedTurbineId} (${blades.length} pás)...`,
+    'info'
+  )
+
+  const turbineOutputDir = path.join(outputDir, normalizedTurbineId)
+  const outExcelPath = path.join(
+    turbineOutputDir,
+    `${normalizedTurbineId}_Novo_Excel.xlsx`
+  )
+  const photosFolder = path.join(turbineOutputDir, 'Fotos')
+
+  fs.mkdirSync(turbineOutputDir, { recursive: true })
+  fs.mkdirSync(photosFolder, { recursive: true })
+
+  // Criar Workbook Excel de saída no formato padrão ServiceNow
+  const outWb = new ExcelJS.Workbook()
+  const outWs = outWb.addWorksheet('Inspection')
+
+  const headerRow = outWs.addRow(OUTPUT_HEADERS)
+  headerRow.eachCell(cell => {
+    cell.font = { bold: true }
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD9EAD3' },
+    }
+  })
+  OUTPUT_HEADERS.forEach((_, idx) => {
+    outWs.getColumn(idx + 1).width = COLUMN_WIDTHS[idx]
+  })
+
+  let rowsProcessed = 0
+  let rowsSkipped = 0
+  let photosOk = 0
+  let photosSkipped = 0
+
+  const photoDownloadQueue: DownloadParams[] = []
+  const nameCounts = new Map<string, number>()
+  const uniqueBladesMap = new Map<
+    string,
+    { fullBladeSerial: string; shortSn: string; setNumber: string }
+  >()
+
+  for (const blade of blades) {
+    const rawBladeSn = String(blade.bladeSn || blade.bladeLetter || 'A')
+    const paddedBladeSn = rawBladeSn.replace(/^B/i, '').padStart(4, '0')
+    const bladeInfo = getBladeInfo(rawBladeSn)
+    const fullBladeSerial = bladeInfo.serial || rawBladeSn
+    const setNumberStr = bladeInfo.setNumber
+      ? String(bladeInfo.setNumber).padStart(2, '0')
+      : '00'
+
+    if (!uniqueBladesMap.has(paddedBladeSn)) {
+      uniqueBladesMap.set(paddedBladeSn, {
+        fullBladeSerial,
+        shortSn: paddedBladeSn,
+        setNumber: setNumberStr,
+      })
+    }
+
+    sendLog(
+      `Buscando defeitos da Pá ${rawBladeSn} (ID: ${blade.windbladeId}) no Arthnex...`,
+      'info'
+    )
+
+    let defects: ArthnexDefect[] = []
+    try {
+      defects = await arthnexApi.getDefectsByBlade({
+        workorderId,
+        windfarmId,
+        turbineId,
+        windbladeId: blade.windbladeId,
+      })
+      sendLog(
+        `  ✓ ${defects.length} defeito(s) encontrado(s) para a Pá ${rawBladeSn}.`,
+        'success'
+      )
+    } catch (err: any) {
+      sendLog(
+        `  ⚠ Erro ao buscar defeitos da Pá ${rawBladeSn}: ${err.message}`,
+        'warning'
+      )
+      continue
+    }
+
+    for (const d of defects) {
+      const severity = Number(d.severity || 1)
+      if (![1, 2, 3, 4, 5].includes(Math.round(severity))) {
+        rowsSkipped++
+        continue
+      }
+
+      // Localização em metros (se vier em mm > 200, converte pra metros)
+      let dfStart = Number(d.location || 0)
+      if (dfStart > 200) {
+        dfStart = dfStart / 1000.0
+      }
+      dfStart = round1(dfStart)
+
+      const origFail = d.name || 'Defect'
+      const section = d.section || 'Section 1'
+      const side = d.side || 'PS'
+      const component = d.sub_component || 'Shell'
+      const surface = d.surface || 'Inside'
+      const polygonRaw = d.coordinates || ''
+      const photoLink = d.image_url || ''
+      const sizeMm = 0 // ou extraído de dimensões
+
+      const subComponent = SnowMappings.getSubComponent(component)
+      const failureType = SnowMappings.getFailure(origFail, subComponent)
+      const damageDesc = SnowMappings.getDamageDescription(rawBladeSn, origFail)
+      const dfEnd = SnowMappings.getDfEnd(dfStart, sizeMm)
+      const profileDepth = SnowMappings.getProfileFromCoordinates(
+        section,
+        side,
+        component,
+        polygonRaw,
+        dfStart
+      )
+      const bladeSection = SnowMappings.getBladeSection(section)
+      const bladeSubsec = SnowMappings.getBladeSubsection(component)
+      const bladeArea = SnowMappings.getBladeArea(component, side)
+
+      const dfStartStr = dfStart.toFixed(1)
+      const dfEndStr = dfEnd.toFixed(1)
+
+      const newRow = outWs.addRow([
+        fullBladeSerial,
+        subComponent,
+        failureType,
+        damageDesc,
+        dfStartStr,
+        dfEndStr,
+        profileDepth,
+        profileDepth,
+        surface,
+        bladeSection,
+        bladeSubsec,
+        bladeArea,
+        sizeMm,
+        photoLink || null,
+        normalizedTurbineId,
+        null, // POI
+      ])
+
+      if (SnowMappings.shouldHighlight(failureType, dfStart)) {
+        newRow.eachCell(cell => {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFC7C7' },
+          }
+        })
+      }
+
+      rowsProcessed++
+
+      if (photoLink) {
+        const areaCode = SnowMappings.areaToFileCode(bladeArea)
+        const bladeCode = `B${paddedBladeSn}`
+
+        let secCode = 'S1'
+        if (bladeSection === 'Section 2') secCode = 'S2'
+        else if (bladeSection === 'Section 3') secCode = 'S3'
+        else if (bladeSection.match(/^Section\s*(\d+)$/i)) {
+          const match = bladeSection.match(/^Section\s*(\d+)$/i)
+          if (match) secCode = `S${match[1]}`
+        } else if (bladeSection.match(/^S\d+$/i)) {
+          secCode = bladeSection.toUpperCase()
+        }
+
+        const baseName = `${bladeCode}_${secCode}_${areaCode}_DF${dfStart}-${dfEnd}`
+        const folderKey = `${normalizedTurbineId}/${rawBladeSn}/${baseName}`
+        const existingCount = nameCounts.get(folderKey) || 0
+        nameCounts.set(folderKey, existingCount + 1)
+
+        const pic1Index = existingCount * 2 + 1
+        const pic2Index = existingCount * 2 + 2
+
+        const pic1Name = `${baseName}_pic${pic1Index}.jpeg`
+        const pic2Name = `${baseName}_pic${pic2Index}.jpeg`
+
+        photoDownloadQueue.push({
+          turbineSn: normalizedTurbineId,
+          bladeSn: rawBladeSn,
+          bladeSection,
+          bladeArea,
+          dfStart,
+          dfEnd,
+          photoUrl: photoLink,
+          coordinatesJson: polygonRaw,
+          surface,
+          photosFolder,
+          baseName,
+          pic1Name,
+          pic2Name,
+        })
+      } else {
+        photosSkipped++
+      }
+    }
+  }
+
+  // Cria pasta Videos
+  const videosFolder = path.join(path.dirname(photosFolder), 'Videos')
+  fs.mkdirSync(videosFolder, { recursive: true })
+
+  // Adiciona 4 linhas de vídeo por pá (DF45–50)
+  const videoVariants = [
+    { sec: 'Section 1', area: 'PS', secCode: 'S1', areaCode: 'PS' },
+    { sec: 'Section 1', area: 'SS', secCode: 'S1', areaCode: 'SS' },
+    { sec: 'Section 2', area: 'PS', secCode: 'S2', areaCode: 'PS' },
+    { sec: 'Section 2', area: 'SS', secCode: 'S2', areaCode: 'SS' },
+  ]
+
+  for (const [, bInfo] of uniqueBladesMap) {
+    const videoDamageDesc = [
+      'Inspection as per SN_241',
+      `Blade: S/N${bInfo.shortSn} Set ${bInfo.setNumber}`,
+      'Inspection number: 1',
+      'Type of Failure is Missing',
+    ].join('\n')
+
+    for (const v of videoVariants) {
+      const videoFileName = `B${bInfo.shortSn}_${v.secCode}_${v.areaCode}_DF45_DF50.mp4`
+
+      outWs.addRow([
+        bInfo.fullBladeSerial,
+        'Blade Inside - Shell',
+        'Type of Failure is Missing',
+        videoDamageDesc,
+        45,
+        50,
+        0,
+        0,
+        'Inside',
+        v.sec,
+        'Shell',
+        v.area,
+        0,
+        videoFileName,
+        null,
+      ])
+    }
+  }
+
+  await outWb.xlsx.writeFile(outExcelPath)
+  sendLog(`Planilha gerada com sucesso: ${outExcelPath}`, 'success')
+
+  // Processamento e download das imagens
+  const totalDownloads = photoDownloadQueue.length
+  sendLog(
+    `Iniciando download e processamento de ${totalDownloads} foto(s)...`,
+    'info'
+  )
+
+  let downloadIndex = 0
+  let processedCount = 0
+  const PROCESS_CONCURRENCY = 4
+
+  const processWorker = async () => {
+    while (downloadIndex < totalDownloads) {
+      const idx = downloadIndex++
+      const p = photoDownloadQueue[idx]
+      const tSn = String(p.turbineSn)
+      const bSn = String(p.bladeSn)
+      const baseName = p.baseName || `B${bSn}_DF${p.dfStart}-${p.dfEnd}`
+      const pic1Name = p.pic1Name || `${baseName}_pic1.jpeg`
+      const pic2Name = p.pic2Name || `${baseName}_pic2.jpeg`
+      const photoUrl = p.photoUrl
+
+      const folder = path.join(photosFolder, tSn, bSn)
+      fs.mkdirSync(folder, { recursive: true })
+
+      try {
+        const buffer = await fetchImageBuffer(photoUrl)
+        let pic1Buffer: Buffer | null = buffer
+        let pic2Buffer: Buffer | null = null
+
+        if (p.coordinatesJson) {
+          try {
+            const result = await createMarkedImages(
+              buffer,
+              p.coordinatesJson,
+              p.surface,
+              p.dfStart
+            )
+            pic1Buffer = result.pic1
+            pic2Buffer = result.pic2
+          } catch (err: any) {
+            sendLog(
+              `  ⚠ Erro ao marcar imagem (${baseName}): ${err.message}`,
+              'warning'
+            )
+            pic1Buffer = buffer
+          }
+        }
+
+        if (pic1Buffer) {
+          fs.writeFileSync(path.join(folder, pic1Name), pic1Buffer)
+        }
+        if (pic2Buffer) {
+          fs.writeFileSync(path.join(folder, pic2Name), pic2Buffer)
+        }
+        photosOk++
+        processedCount++
+        sendLog(
+          `  ✓ Processado e salvo (${processedCount}/${totalDownloads}): ${pic1Name}`,
+          'success'
+        )
+      } catch (err: any) {
+        processedCount++
+        sendLog(
+          `  ✗ Erro no processamento (${baseName}): ${err.message}`,
+          'error'
+        )
+        photosSkipped++
+      }
+    }
+  }
+
+  const processWorkers: Promise<void>[] = []
+  for (let w = 0; w < Math.min(PROCESS_CONCURRENCY, totalDownloads); w++) {
+    processWorkers.push(processWorker())
+  }
+  await Promise.all(processWorkers)
+
+  sendLog(
+    `Processamento do Arthnex para ${normalizedTurbineId} finalizado! Linhas: ${rowsProcessed} defeitos, Fotos: ${photosOk} OK, ${photosSkipped} puladas.`,
+    'success'
+  )
+
+  return {
+    success: true,
+    rowsProcessed,
+    rowsSkipped,
+    photosOk,
+    photosSkipped,
+    outputPath: outExcelPath,
+    photosFolder,
+  }
 }

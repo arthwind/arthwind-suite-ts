@@ -70,7 +70,7 @@ export async function checkpoint(log: LogFn): Promise<void> {
 
   if (paused) {
     log('Pausado — aguardando retomar...', 'warning')
-    await new Promise<void>((resolve) => resumeWaiters.push(resolve))
+    await new Promise<void>(resolve => resumeWaiters.push(resolve))
     if (stopRequested) throw new AutomationStoppedError()
     log('Retomado.', 'success')
   }

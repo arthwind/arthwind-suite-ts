@@ -1,16 +1,16 @@
 import fs from 'fs'
 import path from 'path'
+import { dialog } from 'electron'
 import ExcelJS from 'exceljs'
 import exifr from 'exifr'
 import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
-import { dialog } from 'electron'
 import { cryptoService } from './crypto'
 import { PACKER_REGION_MAP } from './packer'
 
 // ─── Constants and Types ──────────────────────────────────────────────────────
 
-const SUPPORTED_EXTS = new Set([".JPG", ".JPEG"])
+const SUPPORTED_EXTS = new Set(['.JPG', '.JPEG'])
 const _GOPRO_NUM_RE = /G(?:OPR|0\d\d)(\d+)/i
 
 // Split de linha CSV com suporte a campos entre aspas (permite o delimitador aparecer
@@ -62,15 +62,29 @@ function roundHalfToEven(n: number): number {
 }
 
 const _CANON_INTERNAL: Record<string, string> = {
-  'wo': 'WO', 'parque': 'Parque', 'complexo': 'Parque', 'wtg': 'WTG',
-  'aerogerador': 'WTG', 'status': 'Status.', 'ultimoacesso': 'Ultimo Acesso',
-  'datarecoleta': 'Data recoleta', 'uploada': 'UPLOAD A', 'uploadb': 'UPLOAD B',
-  'uploadc': 'UPLOAD C', 'bladea': 'BLADE A', 'bladeb': 'BLADE B', 'bladec': 'BLADE C',
+  wo: 'WO',
+  parque: 'Parque',
+  complexo: 'Parque',
+  wtg: 'WTG',
+  aerogerador: 'WTG',
+  status: 'Status.',
+  ultimoacesso: 'Ultimo Acesso',
+  datarecoleta: 'Data recoleta',
+  uploada: 'UPLOAD A',
+  uploadb: 'UPLOAD B',
+  uploadc: 'UPLOAD C',
+  bladea: 'BLADE A',
+  bladeb: 'BLADE B',
+  bladec: 'BLADE C',
 }
 
 const _CANON_EXTERNAL: Record<string, string> = {
-  'wfid': 'WF Id', 'windfarm': 'Wind Farm', 'turbineid': 'Turbine Id',
-  'status': 'Status', 'uploaddate': 'Upload Date', 'inspectiondate': 'Inspection Date',
+  wfid: 'WF Id',
+  windfarm: 'Wind Farm',
+  turbineid: 'Turbine Id',
+  status: 'Status',
+  uploaddate: 'Upload Date',
+  inspectiondate: 'Inspection Date',
 }
 
 interface EmailTableRecord {
@@ -150,16 +164,20 @@ export function wosMatch(wo1: string, wo2: string): boolean {
 }
 
 export function standardizeTurbineId(turb: any, site: any): string {
-  if (turb === null || turb === undefined || String(turb).trim() === '') return ''
+  if (turb === null || turb === undefined || String(turb).trim() === '')
+    return ''
   let s = String(turb).trim().toLowerCase()
   s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  
+
   let siteClean = String(site).trim().toLowerCase()
   siteClean = siteClean.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   siteClean = siteClean.replace(/[^a-z0-9]/g, '')
 
   s = s.replace(/[-_]/g, ' ')
-  s = s.replace(/\b(aca|ge|ica|eur|mv|fl|lh|ve|ave)(viii|vii|vi|iii|ii|iv|ix|x|v|i)\b/g, '$1 $2')
+  s = s.replace(
+    /\b(aca|ge|ica|eur|mv|fl|lh|ve|ave)(viii|vii|vi|iii|ii|iv|ix|x|v|i)\b/g,
+    '$1 $2'
+  )
   s = s.replace(/\bviii\b/g, '8')
   s = s.replace(/\bvii\b/g, '7')
   s = s.replace(/\bvi\b/g, '6')
@@ -196,16 +214,23 @@ export function standardizeTurbineId(turb: any, site: any): string {
     s = s.replace(/^ser(?=[0-9]|\b)/g, '')
   } else if (siteClean.includes('chui')) {
     s = s.replace(/^ch(?=[0-9]|\b)/g, '')
-  } else if (siteClean.includes('coxilha') || siteClean.includes('entorno') || siteClean.includes('cerrochato')) {
+  } else if (
+    siteClean.includes('coxilha') ||
+    siteClean.includes('entorno') ||
+    siteClean.includes('cerrochato')
+  ) {
     s = s.replace(/^(ecn|cn|ecc|ecse)(?=[0-9]|\b)/g, '')
   }
 
-  s = s.split(/\s+/).map(p => {
-    if (/^[0-9]+$/.test(p)) {
-      return p.replace(/^0+(\d)/, '$1')
-    }
-    return p
-  }).join(' ')
+  s = s
+    .split(/\s+/)
+    .map(p => {
+      if (/^[0-9]+$/.test(p)) {
+        return p.replace(/^0+(\d)/, '$1')
+      }
+      return p
+    })
+    .join(' ')
 
   s = s.replace(/[^a-z0-9]/g, '')
   s = s.replace(/([a-z])0+(\d+)/g, '$1$2')
@@ -213,7 +238,7 @@ export function standardizeTurbineId(turb: any, site: any): string {
   return s
 }
 
-export function turbinesMatch(t1: string, t2: string, site = ""): boolean {
+export function turbinesMatch(t1: string, t2: string, site = ''): boolean {
   const t1Std = standardizeTurbineId(t1, site)
   const t2Std = standardizeTurbineId(t2, site)
   if (t1Std === t2Std) return true
@@ -231,31 +256,52 @@ export function turbinesMatch(t1: string, t2: string, site = ""): boolean {
   return false
 }
 
-export function sitesMatch(site1: string, site2: string, turbId = ""): boolean {
+export function sitesMatch(site1: string, site2: string, turbId = ''): boolean {
   let s1 = normalizeText(site1)
   let s2 = normalizeText(site2)
   if (!s1 || !s2) return false
 
   const tClean = String(turbId).trim().toLowerCase()
-  if (tClean.startsWith('ica') && (s1.includes('acaua') || s2.includes('acaua')) && (s1.includes('icara') || s2.includes('icara'))) {
+  if (
+    tClean.startsWith('ica') &&
+    (s1.includes('acaua') || s2.includes('acaua')) &&
+    (s1.includes('icara') || s2.includes('icara'))
+  ) {
     return true
   }
-  if (tClean.startsWith('ecc') && (s1.includes('coxilha') || s2.includes('coxilha')) && (s1.includes('cerrochato') || s2.includes('cerrochato'))) {
+  if (
+    tClean.startsWith('ecc') &&
+    (s1.includes('coxilha') || s2.includes('coxilha')) &&
+    (s1.includes('cerrochato') || s2.includes('cerrochato'))
+  ) {
     return true
   }
-  if ((tClean.startsWith('ecse') || tClean.startsWith('ese')) && (s1.includes('coxilha') || s2.includes('coxilha')) && (s1.includes('entorno') || s2.includes('entorno'))) {
+  if (
+    (tClean.startsWith('ecse') || tClean.startsWith('ese')) &&
+    (s1.includes('coxilha') || s2.includes('coxilha')) &&
+    (s1.includes('entorno') || s2.includes('entorno'))
+  ) {
     return true
   }
 
   if (s1.includes(s2) || s2.includes(s1)) return true
 
-  const words = ["complexoeolico", "complexo", "eolico", "parqueeolico", "parque", "ventosde", "ventos", "usina"]
+  const words = [
+    'complexoeolico',
+    'complexo',
+    'eolico',
+    'parqueeolico',
+    'parque',
+    'ventosde',
+    'ventos',
+    'usina',
+  ]
   for (const word of words) {
     if (s1.startsWith(word)) s1 = s1.substring(word.length)
     if (s2.startsWith(word)) s2 = s2.substring(word.length)
   }
 
-  const suffixes = ["sgre", "ge", "cesi", "1", "2", "3", "4", "5"]
+  const suffixes = ['sgre', 'ge', 'cesi', '1', '2', '3', '4', '5']
   for (const suffix of suffixes) {
     if (s1.endsWith(suffix)) s1 = s1.substring(0, s1.length - suffix.length)
     if (s2.endsWith(suffix)) s2 = s2.substring(0, s2.length - suffix.length)
@@ -273,11 +319,16 @@ export function sitesMatch(site1: string, site2: string, turbId = ""): boolean {
 }
 
 export function parseCsv(content: string): any[] {
-  const lines = content.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const lines = content
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
   if (lines.length === 0) return []
 
   const delimiter = content.includes(';') ? ';' : ','
-  const headers = parseCsvLine(lines[0], delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
+  const headers = parseCsvLine(lines[0], delimiter).map(h =>
+    h.trim().replace(/^"|"$/g, '')
+  )
 
   const results: any[] = []
   for (let i = 1; i < lines.length; i++) {
@@ -343,9 +394,9 @@ export function parseDate(value: any): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
-
-
-export async function extractGpsAltitude(imagePath: string): Promise<number | null> {
+export async function extractGpsAltitude(
+  imagePath: string
+): Promise<number | null> {
   try {
     const data = await exifr.parse(imagePath)
     if (data && data.GPSAltitude !== undefined) {
@@ -390,7 +441,10 @@ function _normalizeFilename(name: string): string {
   return stem + ext
 }
 
-function _buildImageCache(folder: string, sendLog?: (text: string, type?: string) => void): Record<string, string> {
+function _buildImageCache(
+  folder: string,
+  sendLog?: (text: string, type?: string) => void
+): Record<string, string> {
   const cache: Record<string, string> = {}
   const walk = (dir: string) => {
     if (!fs.existsSync(dir)) return
@@ -404,7 +458,7 @@ function _buildImageCache(folder: string, sendLog?: (text: string, type?: string
         if (SUPPORTED_EXTS.has(ext)) {
           const key = _normalizeFilename(f.name)
           if (cache[key]) {
-            if (sendLog) sendLog(`⚠ Duplicado ignorado: ${f.name}`, "warning")
+            if (sendLog) sendLog(`⚠ Duplicado ignorado: ${f.name}`, 'warning')
           } else {
             cache[key] = fullPath
           }
@@ -448,22 +502,26 @@ function formatLocationForName(value: any): number {
 
 function formatMmPx(value: any): string {
   const n = parseFloat(value)
-  return isNaN(n) ? "UNKNOWN" : n.toFixed(5).replace('.', '_')
+  return isNaN(n) ? 'UNKNOWN' : n.toFixed(5).replace('.', '_')
 }
 
-function _writeMissingFile(outputDir: string, missing: string[], modulo: string): string {
+function _writeMissingFile(
+  outputDir: string,
+  missing: string[],
+  modulo: string
+): string {
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   const outName = `missing_data_${ts}.txt`
   const outPath = path.join(outputDir, outName)
   const lines = [
-    "Arthwind Suite — arquivos nao encontrados",
+    'Arthwind Suite — arquivos nao encontrados',
     `Modulo: ${modulo}`,
     `Data: ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
     `Total: ${missing.length} arquivo(s)`,
-    "-".repeat(50),
-    ...missing
+    '-'.repeat(50),
+    ...missing,
   ]
   fs.writeFileSync(outPath, lines.join('\n') + '\n', 'utf-8')
   return outName
@@ -503,7 +561,12 @@ function _fixPixelMm(values: any[]): any[] {
       }
     }
 
-    if (prevVal !== null && nextVal !== null && prevIdx !== null && nextIdx !== null) {
+    if (
+      prevVal !== null &&
+      nextVal !== null &&
+      prevIdx !== null &&
+      nextIdx !== null
+    ) {
       const t = (i - prevIdx) / (nextIdx - prevIdx)
       result[i] = parseFloat((prevVal + t * (nextVal - prevVal)).toFixed(6))
     } else if (prevVal !== null) {
@@ -513,7 +576,7 @@ function _fixPixelMm(values: any[]): any[] {
     }
   }
 
-  return result.map(v => typeof v === 'number' ? v : parseFloat(v) || 0)
+  return result.map(v => (typeof v === 'number' ? v : parseFloat(v) || 0))
 }
 
 // ─── IMAP / EML Parser ────────────────────────────────────────────────────────
@@ -525,28 +588,29 @@ export function parseEmailTables(htmlContent: string): EmailTableRecord[] {
   let currentCell: string[] = []
   let inTd = false
   let inTh = false
-  
+
   const tagRegex = /<([^>]+)>/g
   let lastIndex = 0
   let match: RegExpExecArray | null
-  
+
   while ((match = tagRegex.exec(htmlContent)) !== null) {
     const textBetween = htmlContent.substring(lastIndex, match.index)
     if (inTd || inTh) {
       currentCell.push(textBetween)
     }
-    
+
     const tagContent = match[1].trim()
     const tagName = tagContent.split(/\s+/)[0].toLowerCase()
-    
+
     if (tagName === 'td' || tagName === 'th') {
-      inTd = (tagName === 'td')
-      inTh = (tagName === 'th')
+      inTd = tagName === 'td'
+      inTh = tagName === 'th'
       currentCell = []
     } else if (tagName === '/td' || tagName === '/th') {
       inTd = false
       inTh = false
-      const cellText = currentCell.join('')
+      const cellText = currentCell
+        .join('')
         .replace(/<[^>]*>/g, '')
         .replace(/&nbsp;/gi, ' ')
         .replace(/&#\d+;/g, '')
@@ -565,7 +629,7 @@ export function parseEmailTables(htmlContent: string): EmailTableRecord[] {
         tables.push(currentTable)
       }
     }
-    
+
     lastIndex = tagRegex.lastIndex
   }
 
@@ -584,25 +648,70 @@ export function parseEmailTables(htmlContent: string): EmailTableRecord[] {
       const rowLower = row.map(c => c.toLowerCase())
       for (let colIdx = 0; colIdx < rowLower.length; colIdx++) {
         const colVal = rowLower[colIdx]
-        
-        if (['site', 'parque', 'complexo', 'farm', 'projeto', 'empreendimento', 'wind park', 'wind_farm'].some(kw => colVal.includes(kw))) {
+
+        if (
+          [
+            'site',
+            'parque',
+            'complexo',
+            'farm',
+            'projeto',
+            'empreendimento',
+            'wind park',
+            'wind_farm',
+          ].some(kw => colVal.includes(kw))
+        ) {
           siteCol = colIdx
         }
-        if (['turbine', 'turbina', 'wtg', 'aerogerador', 'aerog', 'maquina', 'máquina'].some(kw => colVal.includes(kw))) {
+        if (
+          [
+            'turbine',
+            'turbina',
+            'wtg',
+            'aerogerador',
+            'aerog',
+            'maquina',
+            'máquina',
+          ].some(kw => colVal.includes(kw))
+        ) {
           turbCol = colIdx
         }
-        if (['blade', 'pa', 'pá', 'component', 'blade_id'].some(kw => colVal.includes(kw))) {
+        if (
+          ['blade', 'pa', 'pá', 'component', 'blade_id'].some(kw =>
+            colVal.includes(kw)
+          )
+        ) {
           bladeCol = colIdx
         }
-        if (['wo', 'work order', 'os', 'ordem', 'descri'].some(kw => colVal.includes(kw))) {
+        if (
+          ['wo', 'work order', 'os', 'ordem', 'descri'].some(kw =>
+            colVal.includes(kw)
+          )
+        ) {
           woCol = colIdx
         }
-        if (['cliente', 'client', 'contratante', 'customer'].some(kw => colVal.includes(kw))) {
+        if (
+          ['cliente', 'client', 'contratante', 'customer'].some(kw =>
+            colVal.includes(kw)
+          )
+        ) {
           clientCol = colIdx
         }
-        if (['data coleta', 'data da coleta', 'data inspec', 'inspection date', 'date of inspection', 'coleta'].some(kw => colVal.includes(kw))) {
+        if (
+          [
+            'data coleta',
+            'data da coleta',
+            'data inspec',
+            'inspection date',
+            'date of inspection',
+            'coleta',
+          ].some(kw => colVal.includes(kw))
+        ) {
           dateCol = colIdx
-        } else if (dateCol === -1 && ['date', 'data'].some(kw => colVal.includes(kw))) {
+        } else if (
+          dateCol === -1 &&
+          ['date', 'data'].some(kw => colVal.includes(kw))
+        ) {
           dateCol = colIdx
         }
       }
@@ -619,11 +728,21 @@ export function parseEmailTables(htmlContent: string): EmailTableRecord[] {
         if (row.length > Math.max(siteCol, turbCol)) {
           const siteVal = row[siteCol]?.trim() || ''
           const turbVal = row[turbCol]?.trim() || ''
-          const bladeVal = (bladeCol !== -1 && row.length > bladeCol) ? row[bladeCol]?.trim() || '' : ''
-          const woVal = (woCol !== -1 && row.length > woCol) ? row[woCol]?.trim() || '' : ''
-          const dateVal = (dateCol !== -1 && row.length > dateCol) ? row[dateCol]?.trim() || '' : ''
-          const clientVal = (clientCol !== -1 && row.length > clientCol) ? row[clientCol]?.trim() || '' : ''
-          
+          const bladeVal =
+            bladeCol !== -1 && row.length > bladeCol
+              ? row[bladeCol]?.trim() || ''
+              : ''
+          const woVal =
+            woCol !== -1 && row.length > woCol ? row[woCol]?.trim() || '' : ''
+          const dateVal =
+            dateCol !== -1 && row.length > dateCol
+              ? row[dateCol]?.trim() || ''
+              : ''
+          const clientVal =
+            clientCol !== -1 && row.length > clientCol
+              ? row[clientCol]?.trim() || ''
+              : ''
+
           if (siteVal && turbVal) {
             records.push({
               site: siteVal,
@@ -631,7 +750,7 @@ export function parseEmailTables(htmlContent: string): EmailTableRecord[] {
               blade: bladeVal,
               wo: woVal,
               date: dateVal,
-              client: clientVal
+              client: clientVal,
             })
           }
         }
@@ -640,32 +759,41 @@ export function parseEmailTables(htmlContent: string): EmailTableRecord[] {
   }
 
   if (records.length === 0) {
-    const lines = htmlContent.split('\n').map(l => l.trim()).filter(Boolean)
+    const lines = htmlContent
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
     for (const line of lines) {
       const parts = line.split('\t').map(p => p.trim())
       if (parts.length >= 2) {
         const firstLower = parts[0].toLowerCase()
         const secondLower = parts[1].toLowerCase()
-        if (['site', 'parque', 'complexo', 'farm'].includes(firstLower) || ['turbine', 'turbina', 'wtg', 'aerogerador'].includes(secondLower)) {
+        if (
+          ['site', 'parque', 'complexo', 'farm'].includes(firstLower) ||
+          ['turbine', 'turbina', 'wtg', 'aerogerador'].includes(secondLower)
+        ) {
           continue
         }
-        
-        let detectedDate = ""
+
+        let detectedDate = ''
         for (let i = 2; i < parts.length; i++) {
           const p = parts[i]
-          if (/^\d{4}[-/]\d{2}[-/]\d{2}/.test(p) || /^\d{2}[-/]\d{2}[-/]\d{4}/.test(p)) {
+          if (
+            /^\d{4}[-/]\d{2}[-/]\d{2}/.test(p) ||
+            /^\d{2}[-/]\d{2}[-/]\d{4}/.test(p)
+          ) {
             detectedDate = p
             break
           }
         }
-        
+
         records.push({
           site: parts[0],
           turbine: parts[1],
-          blade: parts[2] || "",
-          wo: parts[3] || "",
+          blade: parts[2] || '',
+          wo: parts[3] || '',
           date: detectedDate,
-          client: parts[4] || ""
+          client: parts[4] || '',
         })
       }
     }
@@ -681,16 +809,18 @@ export async function fetchEmailViaImap(config: any): Promise<any> {
     secure: config.use_ssl !== false,
     auth: {
       user: config.username,
-      pass: config.password
+      pass: config.password,
     },
-    logger: false
+    logger: false,
   })
 
   try {
     await client.connect()
     const lock = await client.getMailboxLock('INBOX')
-    
-    const criteria = config.subject_filter ? { subject: config.subject_filter } : { all: true }
+
+    const criteria = config.subject_filter
+      ? { subject: config.subject_filter }
+      : { all: true }
     const searchRes = await client.search(criteria)
     const uids = searchRes || []
 
@@ -699,8 +829,8 @@ export async function fetchEmailViaImap(config: any): Promise<any> {
     const selectedUids = uids.slice(-limit)
 
     const allRecords: any[] = []
-    let latestDate = "N/A"
-    let latestBody = ""
+    let latestDate = 'N/A'
+    let latestBody = ''
 
     for (let i = selectedUids.length - 1; i >= 0; i--) {
       const uid = selectedUids[i]
@@ -711,15 +841,17 @@ export async function fetchEmailViaImap(config: any): Promise<any> {
         if (i === selectedUids.length - 1) {
           latestDate = emailDate
         }
-        
+
         const body = parsed.html || parsed.text || ''
         if (i === selectedUids.length - 1) {
           latestBody = body
         }
-        
+
         const recs = parseEmailTables(body)
         recs.forEach((r: any) => {
-          r.date = r.date || (parsed.date ? parsed.date.toISOString().split('T')[0] : 'N/A')
+          r.date =
+            r.date ||
+            (parsed.date ? parsed.date.toISOString().split('T')[0] : 'N/A')
           allRecords.push(r)
         })
       }
@@ -732,22 +864,25 @@ export async function fetchEmailViaImap(config: any): Promise<any> {
       success: true,
       body: latestBody,
       email_date: latestDate,
-      records: allRecords
+      records: allRecords,
     }
   } catch (err: any) {
     return {
       success: false,
-      error: err.message || String(err)
+      error: err.message || String(err),
     }
   }
 }
 
 // ─── Smartsheet / Excel Layout detection ──────────────────────────────────────
 
-async function readExcelAsJson(buffer: Buffer, sheetPattern?: RegExp): Promise<any[]> {
+async function readExcelAsJson(
+  buffer: Buffer,
+  sheetPattern?: RegExp
+): Promise<any[]> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer as any)
-  
+
   let worksheet = workbook.worksheets[0]
   if (sheetPattern) {
     for (const ws of workbook.worksheets) {
@@ -757,7 +892,7 @@ async function readExcelAsJson(buffer: Buffer, sheetPattern?: RegExp): Promise<a
       }
     }
   }
-  
+
   const results: any[] = []
   if (!worksheet) return results
 
@@ -768,16 +903,15 @@ async function readExcelAsJson(buffer: Buffer, sheetPattern?: RegExp): Promise<a
     headers[col] = val ? val.trim() : ''
   }
 
-
   worksheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return
-    
+
     const obj: any = {}
     let hasData = false
     for (let col = 1; col <= worksheet.columnCount; col++) {
       const header = headers[col]
       if (!header) continue
-      
+
       const cell = row.getCell(col)
       let val: any = cell.value
       if (val && typeof val === 'object' && 'result' in val) {
@@ -786,30 +920,34 @@ async function readExcelAsJson(buffer: Buffer, sheetPattern?: RegExp): Promise<a
       if (cell.type === ExcelJS.ValueType.Date) {
         val = cell.value
       }
-      
-      obj[header] = (val !== null && val !== undefined) ? val : ''
+
+      obj[header] = val !== null && val !== undefined ? val : ''
       if (val !== null && val !== undefined && val !== '') {
         hasData = true
       }
     }
-    
+
     if (hasData) {
       results.push(obj)
     }
   })
 
-  return results;
+  return results
 }
 
 function _detectLayout(rows: any[]): { canonRows: any[]; isInternal: boolean } {
   if (rows.length === 0) return { canonRows: [], isInternal: false }
-  
+
   const headers = Object.keys(rows[0])
   const keys = new Set(headers.map(colKey))
 
-  const hasExternal = keys.has('wfid') || keys.has('turbineid') || keys.has('windfarm')
-  const hasInternal = keys.has('wtg') || keys.has('bladea') || (keys.has('wo') && keys.has('parque'))
-  
+  const hasExternal =
+    keys.has('wfid') || keys.has('turbineid') || keys.has('windfarm')
+  const hasInternal =
+    keys.has('wtg') ||
+    keys.has('bladea') ||
+    (keys.has('wo') && keys.has('parque'))
+
   let isInternal = false
   if (hasExternal && !hasInternal) {
     isInternal = false
@@ -845,15 +983,17 @@ function _detectLayout(rows: any[]): { canonRows: any[]; isInternal: boolean } {
   return { canonRows, isInternal }
 }
 
-
-
-function writeSheet(workbook: ExcelJS.Workbook, sheetName: string, data: any[]): void {
+function writeSheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  data: any[]
+): void {
   if (!data || data.length === 0) return
   const ws = workbook.addWorksheet(sheetName)
-  
+
   const headers = Object.keys(data[0])
   ws.columns = headers.map(h => ({ header: h, key: h, width: 22 }))
-  
+
   data.forEach(item => {
     const rowObj: any = {}
     headers.forEach(h => {
@@ -870,36 +1010,46 @@ function writeSheet(workbook: ExcelJS.Workbook, sheetName: string, data: any[]):
 
 // ─── Exported Electron IPC Services ──────────────────────────────────────────
 
-export async function buscarSmartsheetApi(sheetId: string, token?: string): Promise<any> {
+export async function buscarSmartsheetApi(
+  sheetId: string,
+  token?: string
+): Promise<any> {
   try {
-    const finalToken = (token || "QfVWUV2PCDT63FIadzJqQxdUFNCX0iSwFkfQA").trim()
+    const finalToken = (token || 'QfVWUV2PCDT63FIadzJqQxdUFNCX0iSwFkfQA').trim()
     let finalSheetId = sheetId.trim()
-    
+
     if (finalSheetId.includes('/')) {
       if (finalSheetId.includes('/sheets/')) {
         const parts = finalSheetId.split('/sheets/')
         finalSheetId = parts[1].split('?')[0]
       } else {
-        finalSheetId = finalSheetId.split('/').pop()?.split('?')[0] || finalSheetId
+        finalSheetId =
+          finalSheetId.split('/').pop()?.split('?')[0] || finalSheetId
       }
     }
 
-    const res = await fetch(`https://api.smartsheet.com/2.0/sheets/${finalSheetId}`, {
-      headers: {
-        "Authorization": `Bearer ${finalToken}`,
-        "Accept": "application/vnd.ms-excel"
+    const res = await fetch(
+      `https://api.smartsheet.com/2.0/sheets/${finalSheetId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${finalToken}`,
+          Accept: 'application/vnd.ms-excel',
+        },
       }
-    })
+    )
 
     if (!res.ok) {
       const errText = await res.text()
-      return { success: false, error: `Smartsheet API erro (${res.status}): ${errText.substring(0, 200)}` }
+      return {
+        success: false,
+        error: `Smartsheet API erro (${res.status}): ${errText.substring(0, 200)}`,
+      }
     }
 
     const arrayBuffer = await res.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    const tempDir = path.join(process.cwd(), "temp_smartsheet_downloads")
+    const tempDir = path.join(process.cwd(), 'temp_smartsheet_downloads')
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true })
     }
@@ -919,13 +1069,16 @@ export async function buscarSmartsheetApi(sheetId: string, token?: string): Prom
       }
     }
 
-    const tempFilePath = path.join(tempDir, `smartsheet_${finalSheetId}_${Math.floor(now / 1000)}.xlsx`)
+    const tempFilePath = path.join(
+      tempDir,
+      `smartsheet_${finalSheetId}_${Math.floor(now / 1000)}.xlsx`
+    )
     fs.writeFileSync(tempFilePath, buffer)
 
     return {
       success: true,
       file_path: tempFilePath,
-      fileName: `smartsheet_${finalSheetId}.xlsx`
+      fileName: `smartsheet_${finalSheetId}.xlsx`,
     }
   } catch (err: any) {
     return { success: false, error: err.message || String(err) }
@@ -941,7 +1094,7 @@ async function _parseOperationalForm(
   try {
     const workbook = new ExcelJS.Workbook()
     await workbook.xlsx.load(operationalFormContent as any)
-    
+
     let worksheet = workbook.worksheets[0]
     for (const ws of workbook.worksheets) {
       if (/FORM_OPERACIONAL|OPERACIONAL/i.test(ws.name.toUpperCase())) {
@@ -969,7 +1122,7 @@ async function _parseOperationalForm(
 
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return
-      
+
       let rawDate: any = null
       let woVal = ''
       let siteOrig = ''
@@ -983,12 +1136,18 @@ async function _parseOperationalForm(
         if (!header) return
         const hUpper = header.toUpperCase()
         if (hUpper === 'DATA') rawDate = cell.value
-        else if (hUpper === 'WO') woVal = cell.text ? String(cell.text).trim() : ''
-        else if (hUpper === 'PROJETO') siteOrig = cell.text ? String(cell.text).trim() : ''
-        else if (hUpper === 'PILOTO') pilot = cell.text ? String(cell.text).trim() : ''
-        else if (hUpper === 'AUXILIAR') helper = cell.text ? String(cell.text).trim() : ''
-        else if (hUpper === 'DRONE') drone = cell.text ? String(cell.text).trim() : ''
-        else if (hUpper === 'ESCOPO') escopo = cell.text ? String(cell.text).trim() : ''
+        else if (hUpper === 'WO')
+          woVal = cell.text ? String(cell.text).trim() : ''
+        else if (hUpper === 'PROJETO')
+          siteOrig = cell.text ? String(cell.text).trim() : ''
+        else if (hUpper === 'PILOTO')
+          pilot = cell.text ? String(cell.text).trim() : ''
+        else if (hUpper === 'AUXILIAR')
+          helper = cell.text ? String(cell.text).trim() : ''
+        else if (hUpper === 'DRONE')
+          drone = cell.text ? String(cell.text).trim() : ''
+        else if (hUpper === 'ESCOPO')
+          escopo = cell.text ? String(cell.text).trim() : ''
       })
 
       if (escopo && escopo.toUpperCase().trim() !== 'EXTERNAS') {
@@ -1002,7 +1161,9 @@ async function _parseOperationalForm(
         if (ed && dt > ed) return
       }
 
-      const dateStr = dt ? dt.toISOString().split('T')[0] : String(rawDate).trim()
+      const dateStr = dt
+        ? dt.toISOString().split('T')[0]
+        : String(rawDate).trim()
       const woNorm = normalizeWo(woVal)
       const siteNorm = normalizeText(siteOrig)
 
@@ -1023,7 +1184,7 @@ async function _parseOperationalForm(
               pilot: pilot || 'N/A',
               helper: helper || 'N/A',
               drone: drone || 'N/A',
-              _key: [siteNorm, turbNorm, woNorm]
+              _key: [siteNorm, turbNorm, woNorm],
             }
           }
         }
@@ -1067,9 +1228,14 @@ function _stagedMatch(
 
     if (refDateOk && candDateOk) {
       const candDt = parseDate(candDate)
-      const diff = (refDt && candDt)
-        ? Math.abs(Math.round((refDt.getTime() - candDt.getTime()) / (1000 * 60 * 60 * 24)))
-        : null
+      const diff =
+        refDt && candDt
+          ? Math.abs(
+              Math.round(
+                (refDt.getTime() - candDt.getTime()) / (1000 * 60 * 60 * 24)
+              )
+            )
+          : null
       if (diff === null || diff > 45) continue
       if (wosMatch(refWo, val.wo || '')) {
         woPool.push({ val, diff })
@@ -1120,12 +1286,18 @@ export async function analisarWorkflow(
   }
 
   try {
-    sendLog("Carregando planilha principal...", "info")
+    sendLog('Carregando planilha principal...', 'info')
     const ssBuffer = fs.readFileSync(smartsheetPath)
-    const rawRows = await readExcelAsJson(ssBuffer, /003|INTERNOS|ATW_QLDE_003|034|EXTERNAS|ATW_QLDE_034/i)
-    
+    const rawRows = await readExcelAsJson(
+      ssBuffer,
+      /003|INTERNOS|ATW_QLDE_003|034|EXTERNAS|ATW_QLDE_034/i
+    )
+
     if (rawRows.length === 0) {
-      return { success: false, error: "Planilha do Smartsheet vazia ou aba não reconhecida." }
+      return {
+        success: false,
+        error: 'Planilha do Smartsheet vazia ou aba não reconhecida.',
+      }
     }
 
     const { canonRows, isInternal } = _detectLayout(rawRows)
@@ -1143,16 +1315,22 @@ export async function analisarWorkflow(
       obsCol = isInternal ? 'Observações sobre coleta' : 'Observações'
     }
 
-    const requiredCols = isInternal ? ['WO', 'Parque', 'WTG', 'Status.'] : ['WF Id', 'Wind Farm', 'Turbine Id', 'Status']
+    const requiredCols = isInternal
+      ? ['WO', 'Parque', 'WTG', 'Status.']
+      : ['WF Id', 'Wind Farm', 'Turbine Id', 'Status']
     const firstRow = canonRows[0] || {}
     const missing = requiredCols.filter(col => !(col in firstRow))
     if (missing.length > 0) {
-      return { success: false, error: `Colunas ${isInternal ? 'internas' : 'externas'} obrigatórias não encontradas: ${missing.join(', ')}` }
+      return {
+        success: false,
+        error: `Colunas ${isInternal ? 'internas' : 'externas'} obrigatórias não encontradas: ${missing.join(', ')}`,
+      }
     }
 
     let df = canonRows.filter(row => {
       const camp = isInternal ? row['WO'] : row['WF Id']
-      if (camp === null || camp === undefined || String(camp).trim() === '') return false
+      if (camp === null || camp === undefined || String(camp).trim() === '')
+        return false
       if (/MNT/i.test(String(camp))) return false
       return true
     })
@@ -1174,15 +1352,27 @@ export async function analisarWorkflow(
     }
 
     if (df.length === 0) {
-      return { success: false, error: "Nenhum registro encontrado após os filtros básicos/datas." }
+      return {
+        success: false,
+        error: 'Nenhum registro encontrado após os filtros básicos/datas.',
+      }
     }
 
     const checkIsGround = (row: any): boolean => {
       if (!isInternal) return false
       const wtgStr = String(row['WTG'] || '').toLowerCase()
       const obsStr = String(row[obsCol] || '').toLowerCase()
-      const groundSynonyms = ['solo', 'palas en solo', 'pá em solo', 'ground', 'spare', 'avulsa']
-      return groundSynonyms.some(syn => wtgStr.includes(syn) || obsStr.includes(syn))
+      const groundSynonyms = [
+        'solo',
+        'palas en solo',
+        'pá em solo',
+        'ground',
+        'spare',
+        'avulsa',
+      ]
+      return groundSynonyms.some(
+        syn => wtgStr.includes(syn) || obsStr.includes(syn)
+      )
     }
 
     let groundRows: any[] = []
@@ -1197,11 +1387,18 @@ export async function analisarWorkflow(
         const recoCol = 'Data recoleta' in row ? 'Data recoleta' : null
         if (recoCol) {
           const val = row[recoCol]
-          isRecoleta = val !== null && val !== undefined && String(val).trim() !== '' && String(val).trim() !== 'NaT'
+          isRecoleta =
+            val !== null &&
+            val !== undefined &&
+            String(val).trim() !== '' &&
+            String(val).trim() !== 'NaT'
         }
       } else {
         const statusVal = row['Status']
-        isRecoleta = statusVal !== null && statusVal !== undefined && String(statusVal).includes('*')
+        isRecoleta =
+          statusVal !== null &&
+          statusVal !== undefined &&
+          String(statusVal).includes('*')
       }
       row['Is_Recoleta'] = isRecoleta
 
@@ -1209,7 +1406,11 @@ export async function analisarWorkflow(
       if (isRecoleta) {
         if (isInternal) {
           const statusVal = String(row['Status.'] || '').toLowerCase()
-          if (statusVal.includes('verde') || statusVal.includes('cinza') || statusVal.includes('amarelo')) {
+          if (
+            statusVal.includes('verde') ||
+            statusVal.includes('cinza') ||
+            statusVal.includes('amarelo')
+          ) {
             statusRecoleta = 'Concluída'
           } else {
             statusRecoleta = 'Pendente'
@@ -1217,7 +1418,12 @@ export async function analisarWorkflow(
         } else {
           const uploadCol = 'Upload Date'
           const upDate = row[uploadCol]
-          if (upDate !== null && upDate !== undefined && String(upDate).trim() !== '' && String(upDate).trim() !== 'NaT') {
+          if (
+            upDate !== null &&
+            upDate !== undefined &&
+            String(upDate).trim() !== '' &&
+            String(upDate).trim() !== 'NaT'
+          ) {
             statusRecoleta = 'Concluída'
           } else {
             statusRecoleta = 'Pendente'
@@ -1248,7 +1454,11 @@ export async function analisarWorkflow(
     for (const [key, count] of Object.entries(groupCounts)) {
       if (count > 1) {
         const [camp, turb] = key.split('::')
-        const records = df.filter(row => String(row[campaignCol] || '').trim() === camp && String(row[turbCol] || '').trim() === turb)
+        const records = df.filter(
+          row =>
+            String(row[campaignCol] || '').trim() === camp &&
+            String(row[turbCol] || '').trim() === turb
+        )
         if (records.length === 0) continue
 
         const siteName = String(records[0][wfCol] || '')
@@ -1259,26 +1469,26 @@ export async function analisarWorkflow(
         const hasRecoleta = records.some(r => r['Is_Recoleta'])
         if (!hasRecoleta) {
           escapesList.push({
-            'Wind_Farm': siteName,
-            'Turbine_Id': turb,
-            'Registros': records.length,
-            'WF_Ids': camp
+            Wind_Farm: siteName,
+            Turbine_Id: turb,
+            Registros: records.length,
+            WF_Ids: camp,
           })
         }
       }
     }
 
     let emailRecords: any[] = []
-    let emailStatusMsg = ""
-    let emailImapDate = ""
+    let emailStatusMsg = ''
+    let emailImapDate = ''
 
     if (imapConfig && imapConfig.host) {
-      sendLog("Buscando e-mails via IMAP...", "info")
+      sendLog('Buscando e-mails via IMAP...', 'info')
       const resEmail = await fetchEmailViaImap(imapConfig)
       if (resEmail.success) {
         emailRecords = resEmail.records || []
-        emailContent = resEmail.body || ""
-        emailImapDate = resEmail.email_date || ""
+        emailContent = resEmail.body || ''
+        emailImapDate = resEmail.email_date || ''
         emailStatusMsg = `Obtido ${emailRecords.length} registros de e-mails via IMAP.`
       } else {
         emailStatusMsg = `Falha ao conectar no IMAP: ${resEmail.error}`
@@ -1289,67 +1499,123 @@ export async function analisarWorkflow(
       try {
         const fPathLower = emailFilePath.toLowerCase()
         if (fPathLower.endsWith('.eml')) {
-          sendLog("Lendo arquivo de e-mail .eml...", "info")
+          sendLog('Lendo arquivo de e-mail .eml...', 'info')
           const emlBuffer = fs.readFileSync(emailFilePath)
           const parsed = await simpleParser(emlBuffer)
           emailImapDate = parsed.date ? parsed.date.toString() : ''
           emailContent = parsed.html || parsed.text || ''
-          emailStatusMsg = "E-mail carregado do arquivo .eml."
-        } else if (fPathLower.endsWith('.html') || fPathLower.endsWith('.htm')) {
+          emailStatusMsg = 'E-mail carregado do arquivo .eml.'
+        } else if (
+          fPathLower.endsWith('.html') ||
+          fPathLower.endsWith('.htm')
+        ) {
           emailContent = fs.readFileSync(emailFilePath, 'utf-8')
-          emailStatusMsg = "E-mail carregado do arquivo HTML."
-        } else if (fPathLower.endsWith('.xlsx') || fPathLower.endsWith('.xls')) {
+          emailStatusMsg = 'E-mail carregado do arquivo HTML.'
+        } else if (
+          fPathLower.endsWith('.xlsx') ||
+          fPathLower.endsWith('.xls')
+        ) {
           const fileBuffer = fs.readFileSync(emailFilePath)
           const mailRows = await readExcelAsJson(fileBuffer)
           mailRows.forEach(row_e => {
-            let site_v = '', turb_v = '', blade_v = ''
+            let site_v = '',
+              turb_v = '',
+              blade_v = ''
             Object.keys(row_e).forEach(c => {
               const c_lower = c.toLowerCase()
-              if (['site', 'parque', 'complexo', 'farm', 'projeto', 'empreendimento'].some(kw => c_lower.includes(kw))) {
+              if (
+                [
+                  'site',
+                  'parque',
+                  'complexo',
+                  'farm',
+                  'projeto',
+                  'empreendimento',
+                ].some(kw => c_lower.includes(kw))
+              ) {
                 site_v = String(row_e[c])
-              } else if (['turbine', 'turbina', 'wtg', 'aerogerador', 'aerog'].some(kw => c_lower.includes(kw))) {
+              } else if (
+                ['turbine', 'turbina', 'wtg', 'aerogerador', 'aerog'].some(kw =>
+                  c_lower.includes(kw)
+                )
+              ) {
                 turb_v = String(row_e[c])
-              } else if (['blade', 'pa', 'pá', 'component'].some(kw => c_lower.includes(kw))) {
+              } else if (
+                ['blade', 'pa', 'pá', 'component'].some(kw =>
+                  c_lower.includes(kw)
+                )
+              ) {
                 blade_v = String(row_e[c])
               }
             })
             if (site_v && turb_v) {
-              emailRecords.push({ site: site_v, turbine: turb_v, blade: blade_v })
+              emailRecords.push({
+                site: site_v,
+                turbine: turb_v,
+                blade: blade_v,
+              })
             }
           })
-          emailStatusMsg = "Dados importados de arquivo Excel."
+          emailStatusMsg = 'Dados importados de arquivo Excel.'
         } else if (fPathLower.endsWith('.csv')) {
           const csvContent = fs.readFileSync(emailFilePath, 'utf-8')
           const lines = csvContent.split('\n')
           if (lines.length > 1) {
-            const headersMail = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+            const headersMail = lines[0]
+              .split(',')
+              .map(h => h.trim().replace(/^"|"$/g, ''))
             for (let i = 1; i < lines.length; i++) {
               if (!lines[i].trim()) continue
-              const parts = lines[i].split(',').map(p => p.trim().replace(/^"|"$/g, ''))
+              const parts = lines[i]
+                .split(',')
+                .map(p => p.trim().replace(/^"|"$/g, ''))
               const row_c: any = {}
               headersMail.forEach((h, idx) => {
                 row_c[h] = parts[idx] || ''
               })
-              let site_v = '', turb_v = '', blade_v = ''
+              let site_v = '',
+                turb_v = '',
+                blade_v = ''
               Object.keys(row_c).forEach(c => {
                 const c_lower = c.toLowerCase()
-                if (['site', 'parque', 'complexo', 'farm', 'projeto', 'empreendimento'].some(kw => c_lower.includes(kw))) {
+                if (
+                  [
+                    'site',
+                    'parque',
+                    'complexo',
+                    'farm',
+                    'projeto',
+                    'empreendimento',
+                  ].some(kw => c_lower.includes(kw))
+                ) {
                   site_v = String(row_c[c])
-                } else if (['turbine', 'turbina', 'wtg', 'aerogerador', 'aerog'].some(kw => c_lower.includes(kw))) {
+                } else if (
+                  ['turbine', 'turbina', 'wtg', 'aerogerador', 'aerog'].some(
+                    kw => c_lower.includes(kw)
+                  )
+                ) {
                   turb_v = String(row_c[c])
-                } else if (['blade', 'pa', 'pá', 'component'].some(kw => c_lower.includes(kw))) {
+                } else if (
+                  ['blade', 'pa', 'pá', 'component'].some(kw =>
+                    c_lower.includes(kw)
+                  )
+                ) {
                   blade_v = String(row_c[c])
                 }
               })
               if (site_v && turb_v) {
-                emailRecords.push({ site: site_v, turbine: turb_v, blade: blade_v })
+                emailRecords.push({
+                  site: site_v,
+                  turbine: turb_v,
+                  blade: blade_v,
+                })
               }
             }
           }
-          emailStatusMsg = "Dados importados de arquivo CSV."
+          emailStatusMsg = 'Dados importados de arquivo CSV.'
         } else {
           emailContent = fs.readFileSync(emailFilePath, 'utf-8')
-          emailStatusMsg = "Conteúdo de e-mail carregado de arquivo de texto."
+          emailStatusMsg = 'Conteúdo de e-mail carregado de arquivo de texto.'
         }
       } catch (err: any) {
         emailStatusMsg = `Erro ao ler arquivo de e-mail: ${err.message}`
@@ -1359,19 +1625,23 @@ export async function analisarWorkflow(
     if (emailContent && emailRecords.length === 0) {
       emailRecords = parseEmailTables(emailContent)
       if (!emailStatusMsg) {
-        emailStatusMsg = "E-mail colado/processado com sucesso."
+        emailStatusMsg = 'E-mail colado/processado com sucesso.'
       }
     }
 
     const emailAuditResults: any[] = []
     const missingSsRows: any[] = []
-    let emailError = ""
+    let emailError = ''
 
-    if ((emailContent || emailFilePath || (imapConfig && imapConfig.host)) && emailRecords.length === 0) {
-      emailError = "Nenhum dado ou tabela de e-mail pôde ser extraído. Verifique o conteúdo colado ou os parâmetros de busca do IMAP."
+    if (
+      (emailContent || emailFilePath || (imapConfig && imapConfig.host)) &&
+      emailRecords.length === 0
+    ) {
+      emailError =
+        'Nenhum dado ou tabela de e-mail pôde ser extraído. Verifique o conteúdo colado ou os parâmetros de busca do IMAP.'
     }
 
-    let fallbackDate = ""
+    let fallbackDate = ''
     if (emailImapDate) {
       try {
         const parsedDt = new Date(emailImapDate)
@@ -1380,12 +1650,16 @@ export async function analisarWorkflow(
           fallbackDate = fallbackDt.toISOString().split('T')[0]
         }
       } catch {
-        fallbackDate = ""
+        fallbackDate = ''
       }
     }
 
     emailRecords.forEach(r => {
-      if (!r.date || String(r.date).trim() === '' || String(r.date).trim() === 'N/A') {
+      if (
+        !r.date ||
+        String(r.date).trim() === '' ||
+        String(r.date).trim() === 'N/A'
+      ) {
         r.date = fallbackDate || 'N/A'
       }
       const dVal = r.date
@@ -1434,7 +1708,7 @@ export async function analisarWorkflow(
       email_audit_results: emailAuditResults,
       email_status_msg: emailStatusMsg,
       email_error: emailError,
-      email_parsed_summary: []
+      email_parsed_summary: [],
     }
 
     const ssByTurb: Record<string, any> = {}
@@ -1446,7 +1720,7 @@ export async function analisarWorkflow(
       const woVal = row['WO'] !== undefined ? row['WO'] : row['WF Id']
       const woNorm = normalizeWo(woVal)
 
-      let ssDateVal = ""
+      let ssDateVal = ''
       const dateColName = isInternal ? 'Ultimo Acesso' : 'Inspection Date'
       if (row[dateColName]) {
         const dtVal = parseDate(row[dateColName])
@@ -1460,18 +1734,38 @@ export async function analisarWorkflow(
       const key = `${sNorm}_${tNorm}_${woNorm}`
       const ssBlades: string[] = []
       if (isInternal) {
-        if (row['UPLOAD A'] !== null && row['UPLOAD A'] !== undefined && String(row['UPLOAD A']).trim() !== '' && String(row['UPLOAD A']).trim() !== 'NaT') {
+        if (
+          row['UPLOAD A'] !== null &&
+          row['UPLOAD A'] !== undefined &&
+          String(row['UPLOAD A']).trim() !== '' &&
+          String(row['UPLOAD A']).trim() !== 'NaT'
+        ) {
           ssBlades.push('A')
         }
-        if (row['UPLOAD B'] !== null && row['UPLOAD B'] !== undefined && String(row['UPLOAD B']).trim() !== '' && String(row['UPLOAD B']).trim() !== 'NaT') {
+        if (
+          row['UPLOAD B'] !== null &&
+          row['UPLOAD B'] !== undefined &&
+          String(row['UPLOAD B']).trim() !== '' &&
+          String(row['UPLOAD B']).trim() !== 'NaT'
+        ) {
           ssBlades.push('B')
         }
-        if (row['UPLOAD C'] !== null && row['UPLOAD C'] !== undefined && String(row['UPLOAD C']).trim() !== '' && String(row['UPLOAD C']).trim() !== 'NaT') {
+        if (
+          row['UPLOAD C'] !== null &&
+          row['UPLOAD C'] !== undefined &&
+          String(row['UPLOAD C']).trim() !== '' &&
+          String(row['UPLOAD C']).trim() !== 'NaT'
+        ) {
           ssBlades.push('C')
         }
       } else {
         const upDateCol = 'Upload Date'
-        if (row[upDateCol] !== null && row[upDateCol] !== undefined && String(row[upDateCol]).trim() !== '' && String(row[upDateCol]).trim() !== 'NaT') {
+        if (
+          row[upDateCol] !== null &&
+          row[upDateCol] !== undefined &&
+          String(row[upDateCol]).trim() !== '' &&
+          String(row[upDateCol]).trim() !== 'NaT'
+        ) {
           ssBlades.push('Completo')
         }
       }
@@ -1483,7 +1777,7 @@ export async function analisarWorkflow(
         date: ssDateVal,
         blades: ssBlades,
         row: row,
-        _key: [sNorm, tNorm, woNorm]
+        _key: [sNorm, tNorm, woNorm],
       }
     })
 
@@ -1496,16 +1790,18 @@ export async function analisarWorkflow(
         if (!epBySite[key]) epBySite[key] = []
         epBySite[key].push(r.turbine || '')
       })
-      
-      const emailParsedSummary = Object.entries(epBySite).map(([key, turbines]) => {
-        const [site, wo] = key.split('::')
-        return {
-          'Parque': site,
-          'WO': wo,
-          'Turbinas': turbines.join(', '),
-          'Qtd': turbines.length
+
+      const emailParsedSummary = Object.entries(epBySite).map(
+        ([key, turbines]) => {
+          const [site, wo] = key.split('::')
+          return {
+            Parque: site,
+            WO: wo,
+            Turbinas: turbines.join(', '),
+            Qtd: turbines.length,
+          }
         }
-      })
+      )
       triangulacaoData.email_parsed_summary = emailParsedSummary
 
       emailRecords.forEach(r => {
@@ -1524,7 +1820,7 @@ export async function analisarWorkflow(
             client: r.client || '',
             date: r.date || 'N/A',
             blades: [],
-            _key: [sNorm, tNorm, woNorm]
+            _key: [sNorm, tNorm, woNorm],
           }
         }
 
@@ -1557,30 +1853,42 @@ export async function analisarWorkflow(
         const tOrig = emailInfo.turb_orig
         const emailDate = emailInfo.date
 
-        const matchedSsResult = _stagedMatch(emailDate, emailInfo.wo, eSNorm, eTNorm, sOrig, ssByTurb)
+        const matchedSsResult = _stagedMatch(
+          emailDate,
+          emailInfo.wo,
+          eSNorm,
+          eTNorm,
+          sOrig,
+          ssByTurb
+        )
 
         if (!matchedSsResult) {
           emailAuditResults.push({
-            'Parque': sOrig,
-            'Aerogerador': tOrig,
+            Parque: sOrig,
+            Aerogerador: tOrig,
             'Data no E-mail': emailDate,
             'Status no E-mail': `${emailCount} pá(s) (${emailBlades.join(', ')})`,
-            'Status no Smartsheet': "Não encontrado no Smartsheet",
-            'Tipo de Divergência': "Aerogerador não cadastrado no Smartsheet",
-            'Ação Recomendada': "Adicionar a máquina no Smartsheet"
+            'Status no Smartsheet': 'Não encontrado no Smartsheet',
+            'Tipo de Divergência': 'Aerogerador não cadastrado no Smartsheet',
+            'Ação Recomendada': 'Adicionar a máquina no Smartsheet',
           })
 
           let templateRow: any = null
           for (const row of df) {
             const rSiteNorm = normalizeText(row[wfCol])
-            if (rSiteNorm && (rSiteNorm.includes(eSNorm) || eSNorm.includes(rSiteNorm))) {
+            if (
+              rSiteNorm &&
+              (rSiteNorm.includes(eSNorm) || eSNorm.includes(rSiteNorm))
+            ) {
               templateRow = { ...row }
               break
             }
           }
           if (!templateRow) {
             templateRow = {}
-            Object.keys(df[0] || {}).forEach(k => { templateRow[k] = "" })
+            Object.keys(df[0] || {}).forEach(k => {
+              templateRow[k] = ''
+            })
             templateRow[wfCol] = String(sOrig)
           }
 
@@ -1588,7 +1896,7 @@ export async function analisarWorkflow(
           const woColName = isInternal ? 'WO' : 'WF Id'
           templateRow[woColName] = emailInfo.wo
 
-          let clientColInSs = ""
+          let clientColInSs = ''
           for (const c of Object.keys(templateRow)) {
             if (c.toLowerCase().includes('client')) {
               clientColInSs = c
@@ -1600,12 +1908,23 @@ export async function analisarWorkflow(
             clientValRaw = String(templateRow[clientColInSs])
           }
           if (clientColInSs) {
-            templateRow[clientColInSs] = String(clientValRaw).toUpperCase().trim()
+            templateRow[clientColInSs] = String(clientValRaw)
+              .toUpperCase()
+              .trim()
           }
 
-          const colsToClear = ['Status.', 'Status', 'UPLOAD A', 'UPLOAD B', 'UPLOAD C', 'Upload Date', 'Ultimo Acesso', 'Inspection Date']
+          const colsToClear = [
+            'Status.',
+            'Status',
+            'UPLOAD A',
+            'UPLOAD B',
+            'UPLOAD C',
+            'Upload Date',
+            'Ultimo Acesso',
+            'Inspection Date',
+          ]
           colsToClear.forEach(col => {
-            if (col in templateRow) templateRow[col] = ""
+            if (col in templateRow) templateRow[col] = ''
           })
           missingSsRows.push(templateRow)
         } else {
@@ -1620,37 +1939,52 @@ export async function analisarWorkflow(
 
           if (emailWoOrig && ssWoOrig && woNormEmail !== woNormSs) {
             emailAuditResults.push({
-              'Parque': matchedSsInfo.site_orig,
-              'Aerogerador': matchedSsInfo.turb_orig,
+              Parque: matchedSsInfo.site_orig,
+              Aerogerador: matchedSsInfo.turb_orig,
               'Data no E-mail': emailDate,
               'Status no E-mail': `${emailCount} pá(s) (${emailBlades.join(', ')})`,
               'Status no Smartsheet': `OS diferente no SS: ${ssWoOrig}`,
               'Tipo de Divergência': `Nova OS detectada (e-mail: ${emailWoOrig} / SS: ${ssWoOrig})`,
-              'Ação Recomendada': "Adicionar nova linha no Smartsheet para esta OS e turbina"
+              'Ação Recomendada':
+                'Adicionar nova linha no Smartsheet para esta OS e turbina',
             })
 
             const templateRow = { ...matchedSsInfo.row }
             const woColName = isInternal ? 'WO' : 'WF Id'
             templateRow[woColName] = emailWoOrig
-            const colsToClear = ['Status.', 'Status', 'UPLOAD A', 'UPLOAD B', 'UPLOAD C', 'Upload Date', 'Ultimo Acesso', 'Inspection Date']
+            const colsToClear = [
+              'Status.',
+              'Status',
+              'UPLOAD A',
+              'UPLOAD B',
+              'UPLOAD C',
+              'Upload Date',
+              'Ultimo Acesso',
+              'Inspection Date',
+            ]
             colsToClear.forEach(col => {
-              if (col in templateRow) templateRow[col] = ""
+              if (col in templateRow) templateRow[col] = ''
             })
             missingSsRows.push(templateRow)
           } else if (isInternal) {
             if (emailCount !== ssCount) {
               emailAuditResults.push({
-                'Parque': matchedSsInfo.site_orig,
-                'Aerogerador': matchedSsInfo.turb_orig,
+                Parque: matchedSsInfo.site_orig,
+                Aerogerador: matchedSsInfo.turb_orig,
                 'Data no E-mail': emailDate,
                 'Status no E-mail': `${emailCount} pá(s) (${emailBlades.join(', ')})`,
                 'Status no Smartsheet': `${ssCount} pá(s) (${ssBlades.join(', ')})`,
-                'Tipo de Divergência': "Quantidade de uploads divergente",
-                'Ação Recomendada': "Atualizar a planilha do Smartsheet ou verificar se o upload no Arthnex falhou"
+                'Tipo de Divergência': 'Quantidade de uploads divergente',
+                'Ação Recomendada':
+                  'Atualizar a planilha do Smartsheet ou verificar se o upload no Arthnex falhou',
               })
             } else {
-              const emailBladesSet = new Set(emailBlades.filter(b => ['A', 'B', 'C'].includes(b)))
-              const ssBladesSet = new Set(ssBlades.filter(b => ['A', 'B', 'C'].includes(b)))
+              const emailBladesSet = new Set(
+                emailBlades.filter(b => ['A', 'B', 'C'].includes(b))
+              )
+              const ssBladesSet = new Set(
+                ssBlades.filter(b => ['A', 'B', 'C'].includes(b))
+              )
               let setsMatch = emailBladesSet.size === ssBladesSet.size
               if (setsMatch) {
                 for (const b of emailBladesSet) {
@@ -1662,13 +1996,14 @@ export async function analisarWorkflow(
               }
               if (!setsMatch) {
                 emailAuditResults.push({
-                  'Parque': matchedSsInfo.site_orig,
-                  'Aerogerador': matchedSsInfo.turb_orig,
+                  Parque: matchedSsInfo.site_orig,
+                  Aerogerador: matchedSsInfo.turb_orig,
                   'Data no E-mail': emailDate,
                   'Status no E-mail': `${emailCount} pá(s) (${emailBlades.join(', ')})`,
                   'Status no Smartsheet': `${ssCount} pá(s) (${ssBlades.join(', ')})`,
-                  'Tipo de Divergência': "Pás divergentes",
-                  'Ação Recomendada': "Corrigir as colunas de UPLOAD no Smartsheet"
+                  'Tipo de Divergência': 'Pás divergentes',
+                  'Ação Recomendada':
+                    'Corrigir as colunas de UPLOAD no Smartsheet',
                 })
               }
             }
@@ -1676,13 +2011,14 @@ export async function analisarWorkflow(
             const uniqueEmailBlades = Array.from(new Set(emailBlades))
             if (uniqueEmailBlades.length > 0 && uniqueEmailBlades.length < 3) {
               emailAuditResults.push({
-                'Parque': matchedSsInfo.site_orig,
-                'Aerogerador': matchedSsInfo.turb_orig,
+                Parque: matchedSsInfo.site_orig,
+                Aerogerador: matchedSsInfo.turb_orig,
                 'Data no E-mail': emailDate,
                 'Status no E-mail': `${uniqueEmailBlades.length} pá(s) (${uniqueEmailBlades.join(', ')})`,
-                'Status no Smartsheet': "N/A (Externa)",
-                'Tipo de Divergência': "Coleta Parcial",
-                'Ação Recomendada': "Verificar se as demais pás foram ou serão subidas"
+                'Status no Smartsheet': 'N/A (Externa)',
+                'Tipo de Divergência': 'Coleta Parcial',
+                'Ação Recomendada':
+                  'Verificar se as demais pás foram ou serão subidas',
               })
             }
           }
@@ -1692,15 +2028,32 @@ export async function analisarWorkflow(
       for (const ssVal of Object.values(ssByTurb)) {
         if (ssVal.blades.length > 0) {
           const [ssSNorm, ssTNorm] = ssVal._key
-          const matchedEmailResult = _stagedMatch(ssVal.date || '', ssVal.wo || '', ssSNorm, ssTNorm, ssVal.site_orig, emailByTurb)
+          const matchedEmailResult = _stagedMatch(
+            ssVal.date || '',
+            ssVal.wo || '',
+            ssSNorm,
+            ssTNorm,
+            ssVal.site_orig,
+            emailByTurb
+          )
           const inEmail = matchedEmailResult !== null
           if (!inEmail) {
             const row = ssVal.row
             const uploadDates: string[] = []
-            const colsToCheck = ['UPLOAD A', 'UPLOAD B', 'UPLOAD C', 'Upload Date']
+            const colsToCheck = [
+              'UPLOAD A',
+              'UPLOAD B',
+              'UPLOAD C',
+              'Upload Date',
+            ]
             colsToCheck.forEach(col => {
               const val = row[col]
-              if (val !== null && val !== undefined && String(val).trim() !== '' && String(val).trim() !== 'NaT') {
+              if (
+                val !== null &&
+                val !== undefined &&
+                String(val).trim() !== '' &&
+                String(val).trim() !== 'NaT'
+              ) {
                 const parsed = parseDate(val)
                 if (parsed) {
                   uploadDates.push(parsed.toISOString().split('T')[0])
@@ -1710,12 +2063,14 @@ export async function analisarWorkflow(
             const todayStr = new Date().toISOString().split('T')[0]
             if (uploadDates.some(d => d === todayStr)) {
               emailAuditResults.push({
-                'Parque': ssVal.site_orig,
-                'Aerogerador': ssVal.turb_orig,
-                'Status no E-mail': "Não consta no e-mail do dia",
+                Parque: ssVal.site_orig,
+                Aerogerador: ssVal.turb_orig,
+                'Status no E-mail': 'Não consta no e-mail do dia',
                 'Status no Smartsheet': `Marcado como subido hoje (${ssVal.blades.join(', ')})`,
-                'Tipo de Divergência': "Upload no Smartsheet mas ausente no e-mail",
-                'Ação Recomendada': "Verificar se o e-mail diário omitiu essa máquina ou se o Smartsheet foi atualizado incorretamente"
+                'Tipo de Divergência':
+                  'Upload no Smartsheet mas ausente no e-mail',
+                'Ação Recomendada':
+                  'Verificar se o e-mail diário omitiu essa máquina ou se o Smartsheet foi atualizado incorretamente',
               })
             }
           }
@@ -1725,9 +2080,13 @@ export async function analisarWorkflow(
 
     let operationalRecords: Record<string, any> = {}
     if (operationalFormPath && fs.existsSync(operationalFormPath)) {
-      sendLog("Processando formulário operacional...", "info")
+      sendLog('Processando formulário operacional...', 'info')
       const opBuffer = fs.readFileSync(operationalFormPath)
-      operationalRecords = await _parseOperationalForm(opBuffer, startDate, endDate)
+      operationalRecords = await _parseOperationalForm(
+        opBuffer,
+        startDate,
+        endDate
+      )
     }
 
     const operationalDiscrepancies: any[] = []
@@ -1736,57 +2095,80 @@ export async function analisarWorkflow(
       for (const opVal of Object.values(operationalRecords)) {
         const [opSNorm, opTNorm] = opVal._key
 
-        const matchedEmailResult = _stagedMatch(opVal.date || '', opVal.wo || '', opSNorm, opTNorm, opVal.site_orig, emailByTurb)
+        const matchedEmailResult = _stagedMatch(
+          opVal.date || '',
+          opVal.wo || '',
+          opSNorm,
+          opTNorm,
+          opVal.site_orig,
+          emailByTurb
+        )
 
         if (!matchedEmailResult) {
           operationalDiscrepancies.push({
-            'Parque': opVal.site_orig,
-            'Aerogerador': opVal.turb_orig,
-            'WO': opVal.wo,
+            Parque: opVal.site_orig,
+            Aerogerador: opVal.turb_orig,
+            WO: opVal.wo,
             'Data no Campo': opVal.date,
-            'Piloto': opVal.pilot,
-            'Auxiliar': opVal.helper,
-            'Drone': opVal.drone,
-            'Status': 'Ausente no E-mail',
+            Piloto: opVal.pilot,
+            Auxiliar: opVal.helper,
+            Drone: opVal.drone,
+            Status: 'Ausente no E-mail',
             'Tipo de Divergência': 'Escapou do e-mail diário',
-            'Ação Recomendada': 'Verificar por que a turbina inspecionada não foi listada no e-mail'
+            'Ação Recomendada':
+              'Verificar por que a turbina inspecionada não foi listada no e-mail',
           })
         }
 
-        const matchedSsResult = _stagedMatch(opVal.date || '', opVal.wo || '', opSNorm, opTNorm, opVal.site_orig, ssByTurb)
+        const matchedSsResult = _stagedMatch(
+          opVal.date || '',
+          opVal.wo || '',
+          opSNorm,
+          opTNorm,
+          opVal.site_orig,
+          ssByTurb
+        )
 
         if (!matchedSsResult) {
           operationalDiscrepancies.push({
-            'Parque': opVal.site_orig,
-            'Aerogerador': opVal.turb_orig,
-            'WO': opVal.wo,
+            Parque: opVal.site_orig,
+            Aerogerador: opVal.turb_orig,
+            WO: opVal.wo,
             'Data no Campo': opVal.date,
-            'Piloto': opVal.pilot,
-            'Auxiliar': opVal.helper,
-            'Drone': opVal.drone,
-            'Status': 'Ausente no Smartsheet',
+            Piloto: opVal.pilot,
+            Auxiliar: opVal.helper,
+            Drone: opVal.drone,
+            Status: 'Ausente no Smartsheet',
             'Tipo de Divergência': 'Não cadastrado no Smartsheet',
-            'Ação Recomendada': 'Cadastrar a máquina no Smartsheet'
+            'Ação Recomendada': 'Cadastrar a máquina no Smartsheet',
           })
         }
       }
 
       for (const eInfo of Object.values(emailByTurb)) {
         const [eSNorm, eTNorm] = eInfo._key
-        const matchedOpResult = _stagedMatch(eInfo.date || '', eInfo.wo || '', eSNorm, eTNorm, eInfo.site_orig, operationalRecords)
+        const matchedOpResult = _stagedMatch(
+          eInfo.date || '',
+          eInfo.wo || '',
+          eSNorm,
+          eTNorm,
+          eInfo.site_orig,
+          operationalRecords
+        )
 
         if (!matchedOpResult) {
           operationalDiscrepancies.push({
-            'Parque': eInfo.site_orig,
-            'Aerogerador': eInfo.turb_orig,
-            'WO': eInfo.wo,
+            Parque: eInfo.site_orig,
+            Aerogerador: eInfo.turb_orig,
+            WO: eInfo.wo,
             'Data no Campo': 'N/A',
-            'Piloto': 'N/A',
-            'Auxiliar': 'N/A',
-            'Drone': 'N/A',
-            'Status': 'Ausente no Formulário',
+            Piloto: 'N/A',
+            Auxiliar: 'N/A',
+            Drone: 'N/A',
+            Status: 'Ausente no Formulário',
             'Tipo de Divergência': 'Ausente no relatório operacional de campo',
-            'Ação Recomendada': 'Verificar com a equipe se a turbina de fato foi voada ou se foi erro no e-mail'
+            'Ação Recomendada':
+              'Verificar com a equipe se a turbina de fato foi voada ou se foi erro no e-mail',
           })
         }
       }
@@ -1794,26 +2176,36 @@ export async function analisarWorkflow(
       for (const ssVal of Object.values(ssByTurb)) {
         if (ssVal.blades.length > 0) {
           const [ssSNorm, ssTNorm] = ssVal._key
-          const matchedOpResult = _stagedMatch(ssVal.date || '', ssVal.wo || '', ssSNorm, ssTNorm, ssVal.site_orig, operationalRecords)
+          const matchedOpResult = _stagedMatch(
+            ssVal.date || '',
+            ssVal.wo || '',
+            ssSNorm,
+            ssTNorm,
+            ssVal.site_orig,
+            operationalRecords
+          )
 
           if (!matchedOpResult) {
-            const alreadyExists = operationalDiscrepancies.some(d => 
-              d['Aerogerador'] === ssVal.turb_orig && 
-              d['Status'] === 'Ausente no Formulário' && 
-              sitesMatch(d['Parque'], ssVal.site_orig)
+            const alreadyExists = operationalDiscrepancies.some(
+              d =>
+                d['Aerogerador'] === ssVal.turb_orig &&
+                d['Status'] === 'Ausente no Formulário' &&
+                sitesMatch(d['Parque'], ssVal.site_orig)
             )
             if (!alreadyExists) {
               operationalDiscrepancies.push({
-                'Parque': ssVal.site_orig,
-                'Aerogerador': ssVal.turb_orig,
-                'WO': ssVal.wo,
+                Parque: ssVal.site_orig,
+                Aerogerador: ssVal.turb_orig,
+                WO: ssVal.wo,
                 'Data no Campo': 'N/A',
-                'Piloto': 'N/A',
-                'Auxiliar': 'N/A',
-                'Drone': 'N/A',
-                'Status': 'Ausente no Formulário',
-                'Tipo de Divergência': 'Ausente no relatório operacional de campo',
-                'Ação Recomendada': 'Verificar com a equipe se a turbina de fato foi voada ou se foi erro no Smartsheet'
+                Piloto: 'N/A',
+                Auxiliar: 'N/A',
+                Drone: 'N/A',
+                Status: 'Ausente no Formulário',
+                'Tipo de Divergência':
+                  'Ausente no relatório operacional de campo',
+                'Ação Recomendada':
+                  'Verificar com a equipe se a turbina de fato foi voada ou se foi erro no Smartsheet',
               })
             }
           }
@@ -1830,7 +2222,7 @@ export async function analisarWorkflow(
     if (vendorPath && fs.existsSync(vendorPath)) {
       try {
         triangulacaoData.has_vendor = true
-        sendLog("Processando dados do Vendor...", "info")
+        sendLog('Processando dados do Vendor...', 'info')
         let rawVendor: any[] = []
         if (vendorPath.toLowerCase().endsWith('.csv')) {
           const csvText = fs.readFileSync(vendorPath, 'utf-8')
@@ -1839,33 +2231,73 @@ export async function analisarWorkflow(
           const vBuffer = fs.readFileSync(vendorPath)
           rawVendor = await readExcelAsJson(vBuffer)
         }
-        
-        dfVendor = rawVendor.map(row => {
-          const newRow: any = {}
-          Object.keys(row).forEach(k => {
-            const k_lower = k.toLowerCase().replace(/[^a-z]/g, '')
-            if (['site', 'parque', 'complexo', 'farm', 'windfarm', 'projeto', 'empreendimento'].some(kw => k_lower.includes(kw))) {
-              if (!newRow.Site || k_lower === 'site' || k_lower === 'windfarm') {
-                newRow.Site = String(row[k]).trim().toUpperCase()
+
+        dfVendor = rawVendor
+          .map(row => {
+            const newRow: any = {}
+            Object.keys(row).forEach(k => {
+              const k_lower = k.toLowerCase().replace(/[^a-z]/g, '')
+              if (
+                [
+                  'site',
+                  'parque',
+                  'complexo',
+                  'farm',
+                  'windfarm',
+                  'projeto',
+                  'empreendimento',
+                ].some(kw => k_lower.includes(kw))
+              ) {
+                if (
+                  !newRow.Site ||
+                  k_lower === 'site' ||
+                  k_lower === 'windfarm'
+                ) {
+                  newRow.Site = String(row[k]).trim().toUpperCase()
+                }
+              } else if (
+                [
+                  'turbine',
+                  'turbina',
+                  'wtg',
+                  'aerogerador',
+                  'aerog',
+                  'maquina',
+                  'máquina',
+                ].some(kw => k_lower.includes(kw))
+              ) {
+                if (!newRow.Turbine || k_lower === 'turbine') {
+                  newRow.Turbine = String(row[k]).trim().toUpperCase()
+                }
+              } else if (
+                [
+                  'inspectiondate',
+                  'surveydate',
+                  'date',
+                  'data',
+                  'datacoleta',
+                ].some(kw => k_lower.includes(kw))
+              ) {
+                const dt = parseDate(row[k])
+                newRow.InspectionDate = dt
+                  ? dt.toISOString().split('T')[0]
+                  : String(row[k]).trim()
               }
-            } else if (['turbine', 'turbina', 'wtg', 'aerogerador', 'aerog', 'maquina', 'máquina'].some(kw => k_lower.includes(kw))) {
-              if (!newRow.Turbine || k_lower === 'turbine') {
-                newRow.Turbine = String(row[k]).trim().toUpperCase()
-              }
-            } else if (['inspectiondate', 'surveydate', 'date', 'data', 'datacoleta'].some(kw => k_lower.includes(kw))) {
-              const dt = parseDate(row[k])
-              newRow.InspectionDate = dt ? dt.toISOString().split('T')[0] : String(row[k]).trim()
-            }
+            })
+            return newRow
           })
-          return newRow
-        }).filter(r => r.Site && r.Turbine)
+          .filter(r => r.Site && r.Turbine)
 
         // Mapear os nomes de parques do Vendor (ex: "Oitis") para os nomes canônicos do Smartsheet (ex: "Oitis 1")
-        const ssSites = Array.from(new Set(
-          df.map(row => String(row[wfCol] || '').trim()).filter(Boolean)
-        ))
+        const ssSites = Array.from(
+          new Set(
+            df.map(row => String(row[wfCol] || '').trim()).filter(Boolean)
+          )
+        )
         dfVendor.forEach(r => {
-          const matchedSsSite = ssSites.find(ssSite => sitesMatch(ssSite, r.Site, r.Turbine))
+          const matchedSsSite = ssSites.find(ssSite =>
+            sitesMatch(ssSite, r.Site, r.Turbine)
+          )
           if (matchedSsSite) {
             r.Site = matchedSsSite.toUpperCase()
           }
@@ -1881,9 +2313,9 @@ export async function analisarWorkflow(
 
         const dfUnique = df.map(row => ({
           wf: String(row[wfCol]).trim().toUpperCase(),
-          turb: String(row[turbCol]).trim().toUpperCase()
+          turb: String(row[turbCol]).trim().toUpperCase(),
         }))
-        
+
         dfUnique.forEach(r => {
           const sNorm = normalizeText(r.wf)
           const tNorm = standardizeTurbineId(r.turb, r.wf)
@@ -1892,14 +2324,24 @@ export async function analisarWorkflow(
           ssUniqueMap[key] = [r.wf, r.turb]
         })
 
-        const matchSet = new Set([...vendorUniqueSet].filter(x => ssUniqueSet.has(x)))
-        const missingSsSet = new Set([...vendorUniqueSet].filter(x => !ssUniqueSet.has(x)))
-        const missingVendorSet = new Set([...ssUniqueSet].filter(x => !vendorUniqueSet.has(x)))
+        const matchSet = new Set(
+          [...vendorUniqueSet].filter(x => ssUniqueSet.has(x))
+        )
+        const missingSsSet = new Set(
+          [...vendorUniqueSet].filter(x => !ssUniqueSet.has(x))
+        )
+        const missingVendorSet = new Set(
+          [...ssUniqueSet].filter(x => !vendorUniqueSet.has(x))
+        )
 
         const getVendorDate = (site: string, turb: string): string => {
           const siteNorm = normalizeText(site)
           const turbNorm = standardizeTurbineId(turb, site)
-          const matched = dfVendor.find(r => normalizeText(r.Site) === siteNorm && standardizeTurbineId(r.Turbine, r.Site) === turbNorm)
+          const matched = dfVendor.find(
+            r =>
+              normalizeText(r.Site) === siteNorm &&
+              standardizeTurbineId(r.Turbine, r.Site) === turbNorm
+          )
           return matched ? matched.InspectionDate || 'N/A' : 'N/A'
         }
 
@@ -1907,38 +2349,52 @@ export async function analisarWorkflow(
           const siteNorm = normalizeText(site)
           const turbNorm = standardizeTurbineId(turb, site)
           const dateField = isInternal ? 'Ultimo Acesso' : 'Inspection Date'
-          const matched = df.find(row => normalizeText(row[wfCol]) === siteNorm && standardizeTurbineId(row[turbCol], row[wfCol]) === turbNorm)
+          const matched = df.find(
+            row =>
+              normalizeText(row[wfCol]) === siteNorm &&
+              standardizeTurbineId(row[turbCol], row[wfCol]) === turbNorm
+          )
           if (matched && matched[dateField]) {
             const dt = parseDate(matched[dateField])
-            return dt ? dt.toISOString().split('T')[0] : String(matched[dateField]).trim()
+            return dt
+              ? dt.toISOString().split('T')[0]
+              : String(matched[dateField]).trim()
           }
           return 'N/A'
         }
 
         triangulacaoData.match = Array.from(matchSet).map(k => ({
-          'Wind_Farm': vendorUniqueMap[k][0],
-          'Turbine_Id': vendorUniqueMap[k][1]
+          Wind_Farm: vendorUniqueMap[k][0],
+          Turbine_Id: vendorUniqueMap[k][1],
         }))
 
-        triangulacaoData.missing_in_smartsheet = Array.from(missingSsSet).map(k => ({
-          'Wind_Farm': vendorUniqueMap[k][0],
-          'Turbine_Id': vendorUniqueMap[k][1],
-          'Date': getVendorDate(vendorUniqueMap[k][0], vendorUniqueMap[k][1])
-        }))
+        triangulacaoData.missing_in_smartsheet = Array.from(missingSsSet).map(
+          k => ({
+            Wind_Farm: vendorUniqueMap[k][0],
+            Turbine_Id: vendorUniqueMap[k][1],
+            Date: getVendorDate(vendorUniqueMap[k][0], vendorUniqueMap[k][1]),
+          })
+        )
 
-        triangulacaoData.missing_in_vendor = Array.from(missingVendorSet).map(k => ({
-          'Wind_Farm': ssUniqueMap[k][0],
-          'Turbine_Id': ssUniqueMap[k][1],
-          'Date': getSmartsheetDate(ssUniqueMap[k][0], ssUniqueMap[k][1])
-        }))
+        triangulacaoData.missing_in_vendor = Array.from(missingVendorSet).map(
+          k => ({
+            Wind_Farm: ssUniqueMap[k][0],
+            Turbine_Id: ssUniqueMap[k][1],
+            Date: getSmartsheetDate(ssUniqueMap[k][0], ssUniqueMap[k][1]),
+          })
+        )
 
         const divergenciasList: any[] = []
         if (isInternal) {
           matchSet.forEach(k => {
             const [siteNorm, turbNorm] = k.split('_')
-            const vendorBladesCount = dfVendor.filter(r => normalizeText(r.Site) === siteNorm && standardizeTurbineId(r.Turbine, r.Site) === turbNorm).length
+            const vendorBladesCount = dfVendor.filter(
+              r =>
+                normalizeText(r.Site) === siteNorm &&
+                standardizeTurbineId(r.Turbine, r.Site) === turbNorm
+            ).length
             let ssBlades: string[] = []
-            let ssWo = ""
+            let ssWo = ''
             for (const ssVal of Object.values(ssByTurb)) {
               const [sN, tN] = ssVal._key
               if (sN === siteNorm && tN === turbNorm) {
@@ -1949,14 +2405,14 @@ export async function analisarWorkflow(
             }
             if (vendorBladesCount !== ssBlades.length) {
               divergenciasList.push({
-                'WO': ssWo,
+                WO: ssWo,
                 'Wind Farm': ssUniqueMap[k][0],
                 'Turbine Id': ssUniqueMap[k][1],
-                'Vendor_Blades_Count': vendorBladesCount,
-                'Smartsheet_Blades_Detail': ssBlades.join(', ') || 'Nenhuma',
-                'Vendor_Blades': vendorBladesCount,
-                'Diferenca': vendorBladesCount - ssBlades.length,
-                'Status': 'Divergente'
+                Vendor_Blades_Count: vendorBladesCount,
+                Smartsheet_Blades_Detail: ssBlades.join(', ') || 'Nenhuma',
+                Vendor_Blades: vendorBladesCount,
+                Diferenca: vendorBladesCount - ssBlades.length,
+                Status: 'Divergente',
               })
             }
           })
@@ -1964,9 +2420,18 @@ export async function analisarWorkflow(
         }
 
         const yellowIssues: any[] = []
-        const amareloRows = df.filter(row => String(row[statusColName] || '').toLowerCase().includes('amarelo'))
+        const amareloRows = df.filter(row =>
+          String(row[statusColName] || '')
+            .toLowerCase()
+            .includes('amarelo')
+        )
         if (isInternal) {
-          const pendOpsCol = 'Pendencia Operaçoes' in df[0] ? 'Pendencia Operaçoes' : ('Pendencia Operações' in df[0] ? 'Pendencia Operações' : 'Pendencia Operacoes')
+          const pendOpsCol =
+            'Pendencia Operaçoes' in df[0]
+              ? 'Pendencia Operaçoes'
+              : 'Pendencia Operações' in df[0]
+                ? 'Pendencia Operações'
+                : 'Pendencia Operacoes'
           const pendVisCol = 'Pendencia Visibilidade'
           const isTrueVal = (val: any): boolean => {
             if (val === null || val === undefined) return false
@@ -1979,24 +2444,24 @@ export async function analisarWorkflow(
             const hasOps = isTrueVal(opsVal)
             const hasVis = isTrueVal(visVal)
             if (hasOps || hasVis) {
-              let issueType = "Operações"
-              if (hasOps && hasVis) issueType = "Operações e Visibilidade"
-              else if (hasVis) issueType = "Visibilidade"
+              let issueType = 'Operações'
+              if (hasOps && hasVis) issueType = 'Operações e Visibilidade'
+              else if (hasVis) issueType = 'Visibilidade'
               yellowIssues.push({
-                'Wind_Farm': row[wfCol],
-                'Turbine_Id': row[turbCol],
-                'Issue': issueType,
-                'Observacoes': row[obsCol] || 'Sem comentários'
+                Wind_Farm: row[wfCol],
+                Turbine_Id: row[turbCol],
+                Issue: issueType,
+                Observacoes: row[obsCol] || 'Sem comentários',
               })
             }
           })
         } else {
           amareloRows.forEach(row => {
             yellowIssues.push({
-              'Wind_Farm': row[wfCol],
-              'Turbine_Id': row[turbCol],
-              'Issue': 'Pendente Cliente',
-              'Observacoes': row[obsCol] || 'Sem comentários'
+              Wind_Farm: row[wfCol],
+              Turbine_Id: row[turbCol],
+              Issue: 'Pendente Cliente',
+              Observacoes: row[obsCol] || 'Sem comentários',
             })
           })
         }
@@ -2005,30 +2470,47 @@ export async function analisarWorkflow(
         const recoletasTracking: any[] = []
         if (isInternal) {
           const recoletasRows = df.filter(r => r['Is_Recoleta'])
-          const uniqueTurbinesWithRecoleta = Array.from(new Set(recoletasRows.map(r => `${normalizeText(r[wfCol])}::${standardizeTurbineId(r[turbCol], r[wfCol])}`)))
+          const uniqueTurbinesWithRecoleta = Array.from(
+            new Set(
+              recoletasRows.map(
+                r =>
+                  `${normalizeText(r[wfCol])}::${standardizeTurbineId(r[turbCol], r[wfCol])}`
+              )
+            )
+          )
           uniqueTurbinesWithRecoleta.forEach(tKey => {
             const [sNorm, tNorm] = tKey.split('::')
-            const turbineRecords = df.filter(r => normalizeText(r[wfCol]) === sNorm && standardizeTurbineId(r[turbCol], r[wfCol]) === tNorm)
+            const turbineRecords = df.filter(
+              r =>
+                normalizeText(r[wfCol]) === sNorm &&
+                standardizeTurbineId(r[turbCol], r[wfCol]) === tNorm
+            )
             const firstRecord = turbineRecords[0]
             const wf = firstRecord ? firstRecord[wfCol] : 'N/A'
             const turb = firstRecord ? firstRecord[turbCol] : 'N/A'
             let statusRecoleta = ''
             if (turbineRecords.length === 1) {
-              statusRecoleta = "Pendente (Não iniciada no Smartsheet)"
+              statusRecoleta = 'Pendente (Não iniciada no Smartsheet)'
             } else {
               const newLines = turbineRecords.filter(r => !r['Is_Recoleta'])
               if (newLines.length === 0) {
-                statusRecoleta = "Pendente (Aguardando nova inspeção)"
+                statusRecoleta = 'Pendente (Aguardando nova inspeção)'
               } else {
                 const latestLine = newLines[newLines.length - 1]
-                const latestStatusStr = String(latestLine['Status.'] || '').toLowerCase()
-                if (latestStatusStr.includes('verde') || latestStatusStr.includes('cinza')) {
-                  statusRecoleta = "Concluída com Sucesso"
+                const latestStatusStr = String(
+                  latestLine['Status.'] || ''
+                ).toLowerCase()
+                if (
+                  latestStatusStr.includes('verde') ||
+                  latestStatusStr.includes('cinza')
+                ) {
+                  statusRecoleta = 'Concluída com Sucesso'
                 } else if (latestStatusStr.includes('vermelho')) {
                   if (vendorUniqueSet.has(`${sNorm}_${tNorm}`)) {
-                    statusRecoleta = "Verificar Plataforma/Drive (Arthnex OK, mas SS Vermelho)"
+                    statusRecoleta =
+                      'Verificar Plataforma/Drive (Arthnex OK, mas SS Vermelho)'
                   } else {
-                    statusRecoleta = "Pendente SR"
+                    statusRecoleta = 'Pendente SR'
                   }
                 } else {
                   statusRecoleta = `Pendente (${latestLine['Status.']})`
@@ -2036,37 +2518,58 @@ export async function analisarWorkflow(
               }
             }
             recoletasTracking.push({
-              'Wind_Farm': wf,
-              'Turbine_Id': turb,
-              'Status_Recoleta': statusRecoleta
+              Wind_Farm: wf,
+              Turbine_Id: turb,
+              Status_Recoleta: statusRecoleta,
             })
           })
         } else {
-          const hasStarRows = df.filter(r => String(r['Status'] || '').includes('*'))
-          const uniqueTurbinesWithRecoleta = Array.from(new Set(hasStarRows.map(r => `${normalizeText(r[wfCol])}::${standardizeTurbineId(r[turbCol], r[wfCol])}`)))
+          const hasStarRows = df.filter(r =>
+            String(r['Status'] || '').includes('*')
+          )
+          const uniqueTurbinesWithRecoleta = Array.from(
+            new Set(
+              hasStarRows.map(
+                r =>
+                  `${normalizeText(r[wfCol])}::${standardizeTurbineId(r[turbCol], r[wfCol])}`
+              )
+            )
+          )
           uniqueTurbinesWithRecoleta.forEach(tKey => {
             const [sNorm, tNorm] = tKey.split('::')
-            const turbineRecords = df.filter(r => normalizeText(r[wfCol]) === sNorm && standardizeTurbineId(r[turbCol], r[wfCol]) === tNorm)
+            const turbineRecords = df.filter(
+              r =>
+                normalizeText(r[wfCol]) === sNorm &&
+                standardizeTurbineId(r[turbCol], r[wfCol]) === tNorm
+            )
             const firstRecord = turbineRecords[0]
             const wf = firstRecord ? firstRecord[wfCol] : 'N/A'
             const turb = firstRecord ? firstRecord[turbCol] : 'N/A'
             let statusRecoleta = ''
             if (turbineRecords.length === 1) {
-              statusRecoleta = "Pendente (Não iniciada no Smartsheet)"
+              statusRecoleta = 'Pendente (Não iniciada no Smartsheet)'
             } else {
-              const newLines = turbineRecords.filter(r => !String(r['Status'] || '').includes('*'))
+              const newLines = turbineRecords.filter(
+                r => !String(r['Status'] || '').includes('*')
+              )
               if (newLines.length === 0) {
-                statusRecoleta = "Pendente (Aguardando nova inspeção)"
+                statusRecoleta = 'Pendente (Aguardando nova inspeção)'
               } else {
                 const latestLine = newLines[newLines.length - 1]
-                const latestStatusStr = String(latestLine['Status'] || '').toLowerCase()
-                if (latestStatusStr.includes('verde') || latestStatusStr.includes('cinza')) {
-                  statusRecoleta = "Concluída com Sucesso"
+                const latestStatusStr = String(
+                  latestLine['Status'] || ''
+                ).toLowerCase()
+                if (
+                  latestStatusStr.includes('verde') ||
+                  latestStatusStr.includes('cinza')
+                ) {
+                  statusRecoleta = 'Concluída com Sucesso'
                 } else if (latestStatusStr.includes('vermelho')) {
                   if (vendorUniqueSet.has(`${sNorm}_${tNorm}`)) {
-                    statusRecoleta = "Verificar Plataforma/Drive (Arthnex OK, mas SS Vermelho)"
+                    statusRecoleta =
+                      'Verificar Plataforma/Drive (Arthnex OK, mas SS Vermelho)'
                   } else {
-                    statusRecoleta = "Pendente SR"
+                    statusRecoleta = 'Pendente SR'
                   }
                 } else {
                   statusRecoleta = `Pendente (${latestLine['Status']})`
@@ -2074,21 +2577,30 @@ export async function analisarWorkflow(
               }
             }
             recoletasTracking.push({
-              'Wind_Farm': wf,
-              'Turbine_Id': turb,
-              'Status_Recoleta': statusRecoleta
+              Wind_Farm: wf,
+              Turbine_Id: turb,
+              Status_Recoleta: statusRecoleta,
             })
           })
         }
         triangulacaoData.recoletas = recoletasTracking
       } catch (e) {
-        console.error("Vendor triangulation error:", e)
+        console.error('Vendor triangulation error:', e)
       }
     }
 
     const resumoList: any[] = []
     if (!vendorPath) {
-      const campStats: Record<string, { verde: number; cinza: number; amarelo: number; vermelho: number; total: number }> = {}
+      const campStats: Record<
+        string,
+        {
+          verde: number
+          cinza: number
+          amarelo: number
+          vermelho: number
+          total: number
+        }
+      > = {}
       const campSiteMap: Record<string, string> = {}
 
       df.forEach(row => {
@@ -2097,7 +2609,13 @@ export async function analisarWorkflow(
         campSiteMap[camp] = String(row[wfCol] || '')
 
         if (!campStats[camp]) {
-          campStats[camp] = { verde: 0, cinza: 0, amarelo: 0, vermelho: 0, total: 0 }
+          campStats[camp] = {
+            verde: 0,
+            cinza: 0,
+            amarelo: 0,
+            vermelho: 0,
+            total: 0,
+          }
         }
         const stLower = st.toLowerCase()
         if (stLower.includes('verde')) campStats[camp].verde++
@@ -2109,14 +2627,14 @@ export async function analisarWorkflow(
 
       for (const [camp, stats] of Object.entries(campStats)) {
         resumoList.push({
-          'WF_Id': camp,
-          'Wind_Farm': campSiteMap[camp] || 'Desconhecido',
-          'Total_Linhas': stats.total,
-          'Linhas_Originais': stats.total,
-          'Linhas_Recoleta': 0,
-          'Recoletas_Pendentes': 0,
-          'Recoletas_Concluidas': 0,
-          'Perc_Recoleta': 0.0
+          WF_Id: camp,
+          Wind_Farm: campSiteMap[camp] || 'Desconhecido',
+          Total_Linhas: stats.total,
+          Linhas_Originais: stats.total,
+          Linhas_Recoleta: 0,
+          Recoletas_Pendentes: 0,
+          Recoletas_Concluidas: 0,
+          Perc_Recoleta: 0.0,
         })
       }
     }
@@ -2125,10 +2643,10 @@ export async function analisarWorkflow(
     if (groundRows.length > 0) {
       groundRows.forEach(row => {
         groundList.push({
-          'Wind_Farm': String(row[wfCol]),
-          'Turbine_Id': String(row[turbCol]),
-          'Status': String(row[statusColName]),
-          'Observacoes': String(row[obsCol] || 'Sem comentários')
+          Wind_Farm: String(row[wfCol]),
+          Turbine_Id: String(row[turbCol]),
+          Status: String(row[statusColName]),
+          Observacoes: String(row[obsCol] || 'Sem comentários'),
         })
       })
     }
@@ -2143,17 +2661,30 @@ export async function analisarWorkflow(
             ...d,
             _tipos: [d['Tipo de Divergência']],
             _acoes: [d['Ação Recomendada']],
-            _status: [d['Status']]
+            _status: [d['Status']],
           }
         } else {
           const existing = opC[key]
-          if (!existing._tipos.includes(d['Tipo de Divergência'])) existing._tipos.push(d['Tipo de Divergência'])
-          if (!existing._acoes.includes(d['Ação Recomendada'])) existing._acoes.push(d['Ação Recomendada'])
-          if (!existing._status.includes(d['Status'])) existing._status.push(d['Status'])
-          
-          const fields = ['Data no Campo', 'Piloto', 'Auxiliar', 'Drone'] as const
+          if (!existing._tipos.includes(d['Tipo de Divergência']))
+            existing._tipos.push(d['Tipo de Divergência'])
+          if (!existing._acoes.includes(d['Ação Recomendada']))
+            existing._acoes.push(d['Ação Recomendada'])
+          if (!existing._status.includes(d['Status']))
+            existing._status.push(d['Status'])
+
+          const fields = [
+            'Data no Campo',
+            'Piloto',
+            'Auxiliar',
+            'Drone',
+          ] as const
           fields.forEach(f => {
-            if ((existing[f] === 'N/A' || existing[f] === '' || !existing[f]) && (d[f] !== 'N/A' && d[f] !== '' && d[f])) {
+            if (
+              (existing[f] === 'N/A' || existing[f] === '' || !existing[f]) &&
+              d[f] !== 'N/A' &&
+              d[f] !== '' &&
+              d[f]
+            ) {
               existing[f] = d[f]
             }
           })
@@ -2182,7 +2713,7 @@ export async function analisarWorkflow(
             _tipos: [d['Tipo de Divergência'] || ''],
             _acoes: [d['Ação Recomendada'] || ''],
             _status_em: [d['Status no E-mail'] || ''],
-            _status_ss: [d['Status no Smartsheet'] || '']
+            _status_ss: [d['Status no Smartsheet'] || ''],
           }
         } else {
           const existing = eaC[key]
@@ -2190,7 +2721,7 @@ export async function analisarWorkflow(
             { listKey: '_tipos', keyName: 'Tipo de Divergência' },
             { listKey: '_acoes', keyName: 'Ação Recomendada' },
             { listKey: '_status_em', keyName: 'Status no E-mail' },
-            { listKey: '_status_ss', keyName: 'Status no Smartsheet' }
+            { listKey: '_status_ss', keyName: 'Status no Smartsheet' },
           ]
           lists.forEach(l => {
             const val = d[l.keyName] || ''
@@ -2198,7 +2729,14 @@ export async function analisarWorkflow(
               existing[l.listKey].push(val)
             }
           })
-          if ((existing['Data no E-mail'] === 'N/A' || existing['Data no E-mail'] === '' || !existing['Data no E-mail']) && (d['Data no E-mail'] !== 'N/A' && d['Data no E-mail'] !== '' && d['Data no E-mail'])) {
+          if (
+            (existing['Data no E-mail'] === 'N/A' ||
+              existing['Data no E-mail'] === '' ||
+              !existing['Data no E-mail']) &&
+            d['Data no E-mail'] !== 'N/A' &&
+            d['Data no E-mail'] !== '' &&
+            d['Data no E-mail']
+          ) {
             existing['Data no E-mail'] = d['Data no E-mail']
           }
         }
@@ -2220,7 +2758,7 @@ export async function analisarWorkflow(
     triangulacaoData.email_audit_results = emailAuditResultsConsolidated
 
     const outWorkbook = new ExcelJS.Workbook()
-    
+
     if (resumoList.length > 0) {
       writeSheet(outWorkbook, 'Resumo Campanhas', resumoList)
     }
@@ -2231,34 +2769,69 @@ export async function analisarWorkflow(
       writeSheet(outWorkbook, 'Componentes Solo', groundList)
     }
     if (operationalDiscrepanciesConsolidated.length > 0) {
-      writeSheet(outWorkbook, 'Auditoria Operacional', operationalDiscrepanciesConsolidated)
+      writeSheet(
+        outWorkbook,
+        'Auditoria Operacional',
+        operationalDiscrepanciesConsolidated
+      )
     }
 
     if (triangulacaoData.has_vendor) {
       const tRows: any[] = []
       triangulacaoData.match.forEach((m: any) => {
-        tRows.push({ 'Wind Farm': m.Wind_Farm, 'Turbine Id': m.Turbine_Id, 'Status': 'Bate (100%)' })
+        tRows.push({
+          'Wind Farm': m.Wind_Farm,
+          'Turbine Id': m.Turbine_Id,
+          Status: 'Bate (100%)',
+        })
       })
       triangulacaoData.missing_in_smartsheet.forEach((m: any) => {
-        tRows.push({ 'Wind Farm': m.Wind_Farm, 'Turbine Id': m.Turbine_Id, 'Status': 'Falta no Smartsheet' })
+        tRows.push({
+          'Wind Farm': m.Wind_Farm,
+          'Turbine Id': m.Turbine_Id,
+          Status: 'Falta no Smartsheet',
+        })
       })
       triangulacaoData.missing_in_vendor.forEach((m: any) => {
-        tRows.push({ 'Wind Farm': m.Wind_Farm, 'Turbine Id': m.Turbine_Id, 'Status': 'Falta no Arthnex' })
+        tRows.push({
+          'Wind Farm': m.Wind_Farm,
+          'Turbine Id': m.Turbine_Id,
+          Status: 'Falta no Arthnex',
+        })
       })
       if (tRows.length > 0) {
         writeSheet(outWorkbook, 'Auditoria Triangulada', tRows)
       }
 
-      if (isInternal && triangulacaoData.divergencias_coleta && triangulacaoData.divergencias_coleta.length > 0) {
-        writeSheet(outWorkbook, 'Auditoria de Pás', triangulacaoData.divergencias_coleta)
+      if (
+        isInternal &&
+        triangulacaoData.divergencias_coleta &&
+        triangulacaoData.divergencias_coleta.length > 0
+      ) {
+        writeSheet(
+          outWorkbook,
+          'Auditoria de Pás',
+          triangulacaoData.divergencias_coleta
+        )
       }
 
-      if (triangulacaoData.yellow_issues && triangulacaoData.yellow_issues.length > 0) {
-        writeSheet(outWorkbook, 'Pendências de Coleta', triangulacaoData.yellow_issues)
+      if (
+        triangulacaoData.yellow_issues &&
+        triangulacaoData.yellow_issues.length > 0
+      ) {
+        writeSheet(
+          outWorkbook,
+          'Pendências de Coleta',
+          triangulacaoData.yellow_issues
+        )
       }
 
       if (triangulacaoData.recoletas && triangulacaoData.recoletas.length > 0) {
-        writeSheet(outWorkbook, 'Controle de Recoletas', triangulacaoData.recoletas)
+        writeSheet(
+          outWorkbook,
+          'Controle de Recoletas',
+          triangulacaoData.recoletas
+        )
       }
     }
 
@@ -2268,7 +2841,11 @@ export async function analisarWorkflow(
         writeSheet(outWorkbook, 'E-mail Extraído', epSummary)
       }
       if (emailAuditResultsConsolidated.length > 0) {
-        writeSheet(outWorkbook, 'Auditoria E-mail Arthnex', emailAuditResultsConsolidated)
+        writeSheet(
+          outWorkbook,
+          'Auditoria E-mail Arthnex',
+          emailAuditResultsConsolidated
+        )
       }
       if (missingSsRows.length > 0) {
         writeSheet(outWorkbook, 'Novas Linhas Smartsheet', missingSsRows)
@@ -2277,10 +2854,29 @@ export async function analisarWorkflow(
 
     const colsToExport: string[] = []
     if (isInternal) {
-      colsToExport.push('WO', 'Parque', 'WTG', 'Status.', 'BLADE A', 'UPLOAD A', 'BLADE B', 'UPLOAD B', 'BLADE C', 'UPLOAD C', 'Ultimo Acesso')
+      colsToExport.push(
+        'WO',
+        'Parque',
+        'WTG',
+        'Status.',
+        'BLADE A',
+        'UPLOAD A',
+        'BLADE B',
+        'UPLOAD B',
+        'BLADE C',
+        'UPLOAD C',
+        'Ultimo Acesso'
+      )
       if (obsCol) colsToExport.push(obsCol)
     } else {
-      colsToExport.push('WF Id', 'Wind Farm', 'Turbine Id', 'Status', 'Is_Recoleta', 'Status_Recoleta')
+      colsToExport.push(
+        'WF Id',
+        'Wind Farm',
+        'Turbine Id',
+        'Status',
+        'Is_Recoleta',
+        'Status_Recoleta'
+      )
       const uploadCol = 'Upload Date'
       if (uploadCol) colsToExport.push(uploadCol)
       if (obsCol) colsToExport.push(obsCol)
@@ -2289,7 +2885,7 @@ export async function analisarWorkflow(
     const exportedData = df.map(row => {
       const r: any = {}
       colsToExport.forEach(col => {
-        r[col] = row[col] !== undefined ? row[col] : ""
+        r[col] = row[col] !== undefined ? row[col] : ''
       })
       return r
     })
@@ -2305,19 +2901,37 @@ export async function analisarWorkflow(
     })
     const campaigns = Array.from(campaignsSet)
 
-    const documentsDir = path.join(process.env.USERPROFILE || process.env.HOME || '', "Documents")
-    const outRoot = path.join(documentsDir, "Arthwind Suite", "WORKFLOW_ANALYSIS")
+    const documentsDir = path.join(
+      process.env.USERPROFILE || process.env.HOME || '',
+      'Documents'
+    )
+    const outRoot = path.join(
+      documentsDir,
+      'Arthwind Suite',
+      'WORKFLOW_ANALYSIS'
+    )
     if (!fs.existsSync(outRoot)) {
       fs.mkdirSync(outRoot, { recursive: true })
     }
 
-    const timestamp = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '')
-    const campName = campaigns.join('_').replace(/[\/*?:"<>|]/g, '').substring(0, 40) || 'Workflow'
-    const outPath = path.join(outRoot, `Resumo_Workflow_${campName}_${timestamp}.xlsx`)
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/T/, '_')
+      .replace(/\..+/, '')
+      .replace(/:/g, '')
+    const campName =
+      campaigns
+        .join('_')
+        .replace(/[\/*?:"<>|]/g, '')
+        .substring(0, 40) || 'Workflow'
+    const outPath = path.join(
+      outRoot,
+      `Resumo_Workflow_${campName}_${timestamp}.xlsx`
+    )
 
     await outWorkbook.xlsx.writeFile(outPath)
 
-    sendLog(`Relatório gerado em: ${outPath}`, "success")
+    sendLog(`Relatório gerado em: ${outPath}`, 'success')
 
     return {
       success: true,
@@ -2331,38 +2945,49 @@ export async function analisarWorkflow(
       excel_bytes: null,
       total_campanhas: resumoList.length,
       total_escapes: escapesList.length,
-      output_file: outPath
+      output_file: outPath,
     }
   } catch (err: any) {
-    sendLog(`Erro na análise do workflow: ${err.message}`, "error")
+    sendLog(`Erro na análise do workflow: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function gerarPlanilhaSrPendente(smartsheetPath: string, webContents?: any): Promise<any> {
+export async function gerarPlanilhaSrPendente(
+  smartsheetPath: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Lendo planilha Smartsheet...", "info")
+    sendLog('Lendo planilha Smartsheet...', 'info')
     const ssBuffer = fs.readFileSync(smartsheetPath)
-    const rawRows = await readExcelAsJson(ssBuffer, /003|INTERNOS|ATW_QLDE_003|034|EXTERNAS|ATW_QLDE_034/i)
+    const rawRows = await readExcelAsJson(
+      ssBuffer,
+      /003|INTERNOS|ATW_QLDE_003|034|EXTERNAS|ATW_QLDE_034/i
+    )
 
     if (rawRows.length === 0) {
-      return { success: false, error: "Nenhum dado encontrado na planilha." }
+      return { success: false, error: 'Nenhum dado encontrado na planilha.' }
     }
 
     const { canonRows, isInternal } = _detectLayout(rawRows)
 
     const statusCol = isInternal ? 'Status.' : 'Status'
     const pendingRows = canonRows.filter(row => {
-      const status = String(row[statusCol] || '').trim().toLowerCase()
+      const status = String(row[statusCol] || '')
+        .trim()
+        .toLowerCase()
       return status === 'vermelho'
     })
 
     if (pendingRows.length === 0) {
-      return { success: false, error: "Nenhum aerogerador com status Vermelho foi encontrado." }
+      return {
+        success: false,
+        error: 'Nenhum aerogerador com status Vermelho foi encontrado.',
+      }
     }
 
     const dateCol = isInternal ? 'Ultimo Acesso' : 'Inspection Date'
@@ -2373,7 +2998,7 @@ export async function gerarPlanilhaSrPendente(smartsheetPath: string, webContent
       const turbinaVal = row[isInternal ? 'WTG' : 'Turbine Id'] || ''
       const pilotoVal = row['Piloto'] || ''
       const rawDate = row[dateCol] || ''
-      
+
       let dateVal = ''
       const parsedDt = parseDate(rawDate)
       if (parsedDt) {
@@ -2383,37 +3008,47 @@ export async function gerarPlanilhaSrPendente(smartsheetPath: string, webContent
       }
 
       return {
-        'WO': String(woVal).trim(),
-        'Parque': String(parqueVal).trim(),
-        'Cliente': String(clientVal).trim(),
-        'Turbina': String(turbinaVal).trim(),
-        'Piloto': String(pilotoVal).trim(),
-        'Data da Coleta': dateVal
+        WO: String(woVal).trim(),
+        Parque: String(parqueVal).trim(),
+        Cliente: String(clientVal).trim(),
+        Turbina: String(turbinaVal).trim(),
+        Piloto: String(pilotoVal).trim(),
+        'Data da Coleta': dateVal,
       }
     })
 
     const workbook = new ExcelJS.Workbook()
     writeSheet(workbook, 'SR_Pendentes', exportRows)
 
-    const documentsDir = path.join(process.env.USERPROFILE || process.env.HOME || '', "Documents")
-    const outRoot = path.join(documentsDir, "Arthwind Suite", "SR_PENDENTES")
+    const documentsDir = path.join(
+      process.env.USERPROFILE || process.env.HOME || '',
+      'Documents'
+    )
+    const outRoot = path.join(documentsDir, 'Arthwind Suite', 'SR_PENDENTES')
     if (!fs.existsSync(outRoot)) {
       fs.mkdirSync(outRoot, { recursive: true })
     }
 
-    const timestamp = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '')
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/T/, '_')
+      .replace(/\..+/, '')
+      .replace(/:/g, '')
     const outPath = path.join(outRoot, `SR_Pendentes_${timestamp}.xlsx`)
     await workbook.xlsx.writeFile(outPath)
 
-    sendLog(`Planilha de SRs Pendentes gerada com sucesso: ${outPath}`, "success")
+    sendLog(
+      `Planilha de SRs Pendentes gerada com sucesso: ${outPath}`,
+      'success'
+    )
 
     return {
       success: true,
       output_file: outPath,
-      count: exportRows.length
+      count: exportRows.length,
     }
   } catch (err: any) {
-    sendLog(`Erro ao gerar planilha de SRs Pendentes: ${err.message}`, "error")
+    sendLog(`Erro ao gerar planilha de SRs Pendentes: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
@@ -2432,25 +3067,37 @@ export async function organizarImagens(
   }
 
   try {
-    sendLog("Lendo CSV...", "info")
+    sendLog('Lendo CSV...', 'info')
     const csvContent = fs.readFileSync(csvPath, 'utf-8')
     let delimiter = ';'
     if (!csvContent.includes(';')) delimiter = ','
 
     const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
     const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
-    const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
-      const obj: any = {}
-      headers.forEach((h, idx) => {
-        obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+    const rows = lines
+      .slice(1)
+      .filter(l => l.length >= headers.length)
+      .map(l => {
+        const obj: any = {}
+        headers.forEach((h, idx) => {
+          obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+        })
+        return obj
       })
-      return obj
-    })
 
-    const required = ['Blade SN', 'Side', 'Original Image', 'Location', 'Pixel MM']
+    const required = [
+      'Blade SN',
+      'Side',
+      'Original Image',
+      'Location',
+      'Pixel MM',
+    ]
     const missing = required.filter(r => !headers.includes(r))
     if (missing.length > 0) {
-      return { success: false, error: `Colunas ausentes no CSV: ${missing.join(', ')}` }
+      return {
+        success: false,
+        error: `Colunas ausentes no CSV: ${missing.join(', ')}`,
+      }
     }
 
     // Fix Pixel MM
@@ -2465,13 +3112,16 @@ export async function organizarImagens(
     })
 
     if (corrections > 0) {
-      sendLog(`⚠ ${corrections} valor(es) de Pixel MM corrompidos corrigidos por interpolação.`, "warning")
+      sendLog(
+        `⚠ ${corrections} valor(es) de Pixel MM corrompidos corrigidos por interpolação.`,
+        'warning'
+      )
     }
 
-    sendLog("Mapeando arquivos na pasta de fotos...", "info")
+    sendLog('Mapeando arquivos na pasta de fotos...', 'info')
     const imageCache = _buildImageCache(fotosDir)
 
-    const outputDir = path.join(path.dirname(csvPath), "OUTPUT")
+    const outputDir = path.join(path.dirname(csvPath), 'OUTPUT')
     fs.mkdirSync(outputDir, { recursive: true })
 
     let copied = 0
@@ -2480,10 +3130,16 @@ export async function organizarImagens(
 
     rows.forEach((row, idx) => {
       if (idx % 10 === 0 || idx === rows.length - 1) {
-        if (webContents) webContents.send('arthprogress', { current: idx + 1, total: rows.length })
+        if (webContents)
+          webContents.send('arthprogress', {
+            current: idx + 1,
+            total: rows.length,
+          })
       }
 
-      const blade = String(row['Blade SN']).replace(/[\/*?:"<>|]/g, '').trim()
+      const blade = String(row['Blade SN'])
+        .replace(/[\/*?:"<>|]/g, '')
+        .trim()
       const region = String(row['Side']).toUpperCase().trim()
       const original = String(row['Original Image']).trim()
 
@@ -2499,7 +3155,7 @@ export async function organizarImagens(
       fs.mkdirSync(destSubdir, { recursive: true })
 
       let cleanName = path.basename(original)
-      if (mode === "P") {
+      if (mode === 'P') {
         const order = idx + 1
         const zFmt = formatLocationForName(row['Location'])
         const mmFmt = formatMmPx(row['Pixel MM'])
@@ -2509,7 +3165,9 @@ export async function organizarImagens(
       const destPath = path.join(destSubdir, cleanName)
       if (dryRun) {
         if (dryRunSamples.length < 5) {
-          dryRunSamples.push(`  ${path.basename(src)}  →  ${blade}/${region}/${cleanName}`)
+          dryRunSamples.push(
+            `  ${path.basename(src)}  →  ${blade}/${region}/${cleanName}`
+          )
         }
       } else {
         fs.copyFileSync(src, destPath)
@@ -2518,55 +3176,86 @@ export async function organizarImagens(
     })
 
     if (dryRun) {
-      sendLog(`[DRY-RUN] ${copied}/${rows.length} imagens seriam copiadas · ${missingFiles.length} não encontradas`, "warning")
-      dryRunSamples.forEach(s => sendLog(s, "info"))
-      if (copied > 5) sendLog(`  ... e mais ${copied - 5} operação(ões).`, "info")
+      sendLog(
+        `[DRY-RUN] ${copied}/${rows.length} imagens seriam copiadas · ${missingFiles.length} não encontradas`,
+        'warning'
+      )
+      dryRunSamples.forEach(s => sendLog(s, 'info'))
+      if (copied > 5)
+        sendLog(`  ... e mais ${copied - 5} operação(ões).`, 'info')
     } else if (missingFiles.length === 0) {
-      sendLog(`${copied}/${rows.length} imagens organizadas com sucesso`, "success")
-      sendLog(`Output: ${outputDir}`, "info")
+      sendLog(
+        `${copied}/${rows.length} imagens organizadas com sucesso`,
+        'success'
+      )
+      sendLog(`Output: ${outputDir}`, 'info')
     } else {
-      sendLog(`${copied}/${rows.length} imagens organizadas · ${missingFiles.length} não encontradas`, "warning")
-      sendLog(`Output: ${outputDir}`, "info")
-      const reportName = _writeMissingFile(outputDir, missingFiles, "Organizar Imagens S&R")
-      sendLog(`Lista de ausentes salva em OUTPUT/${reportName}`, "warning")
+      sendLog(
+        `${copied}/${rows.length} imagens organizadas · ${missingFiles.length} não encontradas`,
+        'warning'
+      )
+      sendLog(`Output: ${outputDir}`, 'info')
+      const reportName = _writeMissingFile(
+        outputDir,
+        missingFiles,
+        'Organizar Imagens S&R'
+      )
+      sendLog(`Lista de ausentes salva em OUTPUT/${reportName}`, 'warning')
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro na organização: ${err.message}`, "error")
+    sendLog(`Erro na organização: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function processarJson(jsonPath: string, webContents?: any): Promise<any> {
+export async function processarJson(
+  jsonPath: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Lendo arquivo JSON...", "info")
+    sendLog('Lendo arquivo JSON...', 'info')
     const data = cryptoService.loadJson(jsonPath, [], true)
     const windblades = data.windblades || []
     if (windblades.length === 0) {
-      return { success: false, error: "Nenhum windblade encontrado no JSON." }
+      return { success: false, error: 'Nenhum windblade encontrado no JSON.' }
     }
 
     // SP region fix
     let jsonModified = false
-    const validRegions = new Set(["LE", "SS", "TE", "PS"])
+    const validRegions = new Set(['LE', 'SS', 'TE', 'PS'])
     windblades.forEach((item: any) => {
-      if (String(item.region || '').trim().toUpperCase() === 'SP') {
-        const originalName = String(item.image_metadata?.original_file_name || '').toUpperCase()
+      if (
+        String(item.region || '')
+          .trim()
+          .toUpperCase() === 'SP'
+      ) {
+        const originalName = String(
+          item.image_metadata?.original_file_name || ''
+        ).toUpperCase()
         let foundRegion: string | null = null
         for (const r of validRegions) {
-          if (originalName.includes(`_${r}_`) || originalName.includes(`-${r}-`) || originalName.includes(` ${r} `) || originalName.startsWith(`${r}_`)) {
+          if (
+            originalName.includes(`_${r}_`) ||
+            originalName.includes(`-${r}-`) ||
+            originalName.includes(` ${r} `) ||
+            originalName.startsWith(`${r}_`)
+          ) {
             foundRegion = r
             break
           }
         }
         if (foundRegion) {
           item.region = foundRegion
-          sendLog(`⚠ Corrigida região SP na foto ${originalName} para ${foundRegion}`, "warning")
+          sendLog(
+            `⚠ Corrigida região SP na foto ${originalName} para ${foundRegion}`,
+            'warning'
+          )
           jsonModified = true
         }
       }
@@ -2581,13 +3270,18 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
     })
 
     for (const [, items] of Object.entries(bladeGroups)) {
-      const spItems = items.filter((item: any) => String(item.region || '').trim().toUpperCase() === 'SP')
+      const spItems = items.filter(
+        (item: any) =>
+          String(item.region || '')
+            .trim()
+            .toUpperCase() === 'SP'
+      )
       if (spItems.length === 0) continue
 
       const firstItem = items[0]
       const bPos = firstItem.blade_position || ''
       const bSn = firstItem.blade_sn || ''
-      let chosenRegion = "LE"
+      let chosenRegion = 'LE'
 
       const { response } = await dialog.showMessageBox({
         type: 'question',
@@ -2595,11 +3289,11 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
         defaultId: 1,
         cancelId: 0,
         title: `Correção de Região 'SP' - Pá ${bSn}`,
-        message: `Detectamos ${spItems.length} foto(s) com região 'SP' (não especificada) na Pá ${bSn} (Posição ${bPos}).\n\nA primeira fase do voo deve ser LE (Leading Edge).\n\nDeseja renomear automaticamente estas fotos para 'LE' (Leading Edge)?`
+        message: `Detectamos ${spItems.length} foto(s) com região 'SP' (não especificada) na Pá ${bSn} (Posição ${bPos}).\n\nA primeira fase do voo deve ser LE (Leading Edge).\n\nDeseja renomear automaticamente estas fotos para 'LE' (Leading Edge)?`,
       })
 
       if (response === 1) {
-        chosenRegion = "LE"
+        chosenRegion = 'LE'
       } else {
         const { response: resSS } = await dialog.showMessageBox({
           type: 'question',
@@ -2607,10 +3301,10 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
           defaultId: 0,
           cancelId: 0,
           title: `Correção de Região 'SP' - Pá ${bSn}`,
-          message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'SS' (Suction Side)?`
+          message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'SS' (Suction Side)?`,
         })
         if (resSS === 1) {
-          chosenRegion = "SS"
+          chosenRegion = 'SS'
         } else {
           const { response: resTE } = await dialog.showMessageBox({
             type: 'question',
@@ -2618,10 +3312,10 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
             defaultId: 0,
             cancelId: 0,
             title: `Correção de Região 'SP' - Pá ${bSn}`,
-            message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'TE' (Trailing Edge)?`
+            message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'TE' (Trailing Edge)?`,
           })
           if (resTE === 1) {
-            chosenRegion = "TE"
+            chosenRegion = 'TE'
           } else {
             const { response: resPS } = await dialog.showMessageBox({
               type: 'question',
@@ -2629,13 +3323,16 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
               defaultId: 0,
               cancelId: 0,
               title: `Correção de Região 'SP' - Pá ${bSn}`,
-              message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'PS' (Pressure Side)?`
+              message: `Deseja classificar as ${spItems.length} foto(s) da Pá ${bSn} como 'PS' (Pressure Side)?`,
             })
             if (resPS === 1) {
-              chosenRegion = "PS"
+              chosenRegion = 'PS'
             } else {
-              sendLog(`⚠ Todas as opções de região foram recusadas pelo usuário para a Pá ${bSn}. Definido para a região padrão 'LE'.`, "warning")
-              chosenRegion = "LE"
+              sendLog(
+                `⚠ Todas as opções de região foram recusadas pelo usuário para a Pá ${bSn}. Definido para a região padrão 'LE'.`,
+                'warning'
+              )
+              chosenRegion = 'LE'
             }
           }
         }
@@ -2644,33 +3341,48 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
       spItems.forEach((item: any) => {
         item.region = chosenRegion
         const originalName = item.image_metadata?.original_file_name || ''
-        sendLog(`✔ Região da foto '${originalName}' (Pá ${bSn}, ${bPos}) corrigida automaticamente para '${chosenRegion}'.`, "success")
+        sendLog(
+          `✔ Região da foto '${originalName}' (Pá ${bSn}, ${bPos}) corrigida automaticamente para '${chosenRegion}'.`,
+          'success'
+        )
       })
       jsonModified = true
     }
 
     if (jsonModified) {
       fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf-8')
-      sendLog("✔ Arquivo JSON atualizado com as correções de região.", "success")
+      sendLog(
+        '✔ Arquivo JSON atualizado com as correções de região.',
+        'success'
+      )
     }
 
     const rootFolder = path.dirname(jsonPath)
-    sendLog("Mapeando fotos nas pastas locais A/B/C...", "info")
-    
+    sendLog('Mapeando fotos nas pastas locais A/B/C...', 'info')
+
     // Mapa nome normalizado → dados do windblade (para enriquecer o relatório de fotos corrompidas)
-    const windbladeByFile: Record<string, { bladeSn: string; bladePosition: string; region: string }> = {}
+    const windbladeByFile: Record<
+      string,
+      { bladeSn: string; bladePosition: string; region: string }
+    > = {}
     windblades.forEach((item: any) => {
       const original = item.image_metadata?.original_file_name
       if (original) {
         windbladeByFile[_normalizeFilename(original)] = {
           bladeSn: item.blade_sn || '',
           bladePosition: item.blade_position || '',
-          region: item.region || ''
+          region: item.region || '',
         }
       }
     })
 
-    const zeroBytePhotos: { name: string; folder: string; bladeSn: string; bladePosition: string; region: string }[] = []
+    const zeroBytePhotos: {
+      name: string
+      folder: string
+      bladeSn: string
+      bladePosition: string
+      region: string
+    }[] = []
     const imageCache: Record<string, string> = {}
 
     for (const sub of ['A', 'B', 'C']) {
@@ -2689,9 +3401,16 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
                   const stat = fs.statSync(fullPath)
                   if (stat.size === 0) {
                     const normKey = _normalizeFilename(f.name)
-                    const info = windbladeByFile[normKey] || { bladeSn: '', bladePosition: '', region: '' }
+                    const info = windbladeByFile[normKey] || {
+                      bladeSn: '',
+                      bladePosition: '',
+                      region: '',
+                    }
                     zeroBytePhotos.push({ name: f.name, folder: sub, ...info })
-                    sendLog(`❌ Foto corrompida (0 bytes): '${f.name}' na pasta ${sub}.`, "error")
+                    sendLog(
+                      `❌ Foto corrompida (0 bytes): '${f.name}' na pasta ${sub}.`,
+                      'error'
+                    )
                   }
                 } catch (e) {}
                 const normKey = _normalizeFilename(f.name)
@@ -2707,22 +3426,32 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
     }
 
     const uniquePhotosCount = new Set(Object.values(imageCache)).size
-    sendLog(`📁 ${uniquePhotosCount} fotos encontradas.`, "info")
+    sendLog(`📁 ${uniquePhotosCount} fotos encontradas.`, 'info')
     if (zeroBytePhotos.length > 0) {
-      sendLog(`⚠ Detectadas ${zeroBytePhotos.length} fotos corrompidas (com tamanho 0 bytes). Seus caminhos foram gerados normalmente no CSV para permitir que você as substitua na pasta física pelo seu backup antes do upload.`, "error")
+      sendLog(
+        `⚠ Detectadas ${zeroBytePhotos.length} fotos corrompidas (com tamanho 0 bytes). Seus caminhos foram gerados normalmente no CSV para permitir que você as substitua na pasta física pelo seu backup antes do upload.`,
+        'error'
+      )
 
-      const reportPath = path.join(rootFolder, `fotos_corrompidas_0_bytes_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`)
+      const reportPath = path.join(
+        rootFolder,
+        `fotos_corrompidas_0_bytes_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`
+      )
       const reportLines = [
-        "Arthwind Suite — fotos corrompidas (0 bytes)",
+        'Arthwind Suite — fotos corrompidas (0 bytes)',
         `Data: ${new Date().toISOString()}`,
         `Total: ${zeroBytePhotos.length} foto(s)`,
-        "--------------------------------------------------",
-        ...zeroBytePhotos.map(zb =>
-          `ID/Nome: ${zb.name} | Pasta: ${zb.folder} | Blade SN: ${zb.bladeSn || '?'} | Posição: ${zb.bladePosition || '?'} | Região: ${zb.region || '?'}`
-        )
+        '--------------------------------------------------',
+        ...zeroBytePhotos.map(
+          zb =>
+            `ID/Nome: ${zb.name} | Pasta: ${zb.folder} | Blade SN: ${zb.bladeSn || '?'} | Posição: ${zb.bladePosition || '?'} | Região: ${zb.region || '?'}`
+        ),
       ]
       fs.writeFileSync(reportPath, reportLines.join('\n'), 'utf-8')
-      sendLog(`Lista de fotos corrompidas salva em ${path.basename(reportPath)} (na pasta do JSON).`, "warning")
+      sendLog(
+        `Lista de fotos corrompidas salva em ${path.basename(reportPath)} (na pasta do JSON).`,
+        'warning'
+      )
 
       await dialog.showMessageBox({
         type: 'warning',
@@ -2730,7 +3459,7 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
         defaultId: 0,
         title: 'Fotos Corrompidas Detectadas (0 bytes)',
         message: `Detectamos ${zeroBytePhotos.length} foto(s) com 0 bytes (corrompidas) nas pastas A/B/C.`,
-        detail: `Os caminhos delas foram incluídos normalmente no CSV final, mas você deve substituí-las pelo backup físico antes do upload.\n\nUma lista completa foi salva em:\n${reportPath}`
+        detail: `Os caminhos delas foram incluídos normalmente no CSV final, mas você deve substituí-las pelo backup físico antes do upload.\n\nUma lista completa foi salva em:\n${reportPath}`,
       })
     }
 
@@ -2744,9 +3473,16 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
 
     let excludeMissing = false
     if (missingPhotos.length > 0) {
-      sendLog(`⚠ ${missingPhotos.length} fotos do JSON não existem fisicamente nas pastas locais.`, "warning")
-      missingPhotos.slice(0, 10).forEach(fn => sendLog(`   - ${fn}`, "warning"))
-      if (missingPhotos.length > 10) sendLog(`   ... e mais ${missingPhotos.length - 10} foto(s).`, "warning")
+      sendLog(
+        `⚠ ${missingPhotos.length} fotos do JSON não existem fisicamente nas pastas locais.`,
+        'warning'
+      )
+      missingPhotos.slice(0, 10).forEach(fn => sendLog(`   - ${fn}`, 'warning'))
+      if (missingPhotos.length > 10)
+        sendLog(
+          `   ... e mais ${missingPhotos.length - 10} foto(s).`,
+          'warning'
+        )
 
       // Réplica do confirm_fn síncrono do pywebview (create_confirmation_dialog) — no
       // Electron não existe esse atalho de chamar de volta a UI e esperar, mas o próprio
@@ -2759,13 +3495,20 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
         cancelId: 0,
         title: 'Fotos Faltantes Detectadas',
         message: `Detectamos ${missingPhotos.length} foto(s) no JSON que não existem fisicamente nas pastas A/B/C.`,
-        detail: 'Deseja EXCLUIR as linhas dessas fotos do CSV final para evitar erros de upload? (Se escolher Não, as linhas serão mantidas com o caminho em branco).'
+        detail:
+          'Deseja EXCLUIR as linhas dessas fotos do CSV final para evitar erros de upload? (Se escolher Não, as linhas serão mantidas com o caminho em branco).',
       })
       excludeMissing = response === 1
       if (excludeMissing) {
-        sendLog(`✔ Confirmado: as ${missingPhotos.length} fotos faltantes serão excluídas do CSV final.`, "success")
+        sendLog(
+          `✔ Confirmado: as ${missingPhotos.length} fotos faltantes serão excluídas do CSV final.`,
+          'success'
+        )
       } else {
-        sendLog("⚠ As linhas das fotos faltantes serão mantidas no CSV com caminho em branco.", "warning")
+        sendLog(
+          '⚠ As linhas das fotos faltantes serão mantidas no CSV com caminho em branco.',
+          'warning'
+        )
       }
     }
 
@@ -2790,7 +3533,7 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
     for (const [key, items] of Object.entries(groups)) {
       const bladePosition = items[0].blade_position
       const bladeSn = items[0].blade_sn
-      
+
       const byRegion: Record<string, any[]> = {}
       items.forEach((item: any) => {
         const r = item.region || ''
@@ -2802,15 +3545,21 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
       for (const [region, regionItems] of Object.entries(byRegion)) {
         const isTipToRoot = region === 'SS' || region === 'PS'
         regionItems.sort((a, b) => {
-          const tA = extractDjiTimestamp(a.image_metadata?.original_file_name || '').getTime()
-          const tB = extractDjiTimestamp(b.image_metadata?.original_file_name || '').getTime()
+          const tA = extractDjiTimestamp(
+            a.image_metadata?.original_file_name || ''
+          ).getTime()
+          const tB = extractDjiTimestamp(
+            b.image_metadata?.original_file_name || ''
+          ).getTime()
           return tA - tB
         })
         if (isTipToRoot) {
           regionItems.reverse()
         }
 
-        const rawPx = regionItems.map(item => item.image_metadata?.pixel_size || '')
+        const rawPx = regionItems.map(
+          item => item.image_metadata?.pixel_size || ''
+        )
         const fixedPx = _fixPixelMm(rawPx)
 
         regionItems.forEach((item, idxR) => {
@@ -2818,33 +3567,47 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
           const location = item.image_metadata?.location || 0
           const pixelSize = fixedPx[idxR]
           const matchedFile = imageCache[originalName.toLowerCase()] || ''
-          const imageIdVal = matchedFile ? path.relative(rootFolder, matchedFile).replace(/\//g, '\\') : ''
+          const imageIdVal = matchedFile
+            ? path.relative(rootFolder, matchedFile).replace(/\//g, '\\')
+            : ''
 
           if (!matchedFile && excludeMissing) return // linha excluída por confirmação do usuário
 
           rows.push({
-            'id': idCounter, 'workorder': workorderId,
-            'turbine': turbineName, 'blade': bladeSn,
-            'region': region, 'image_id': imageIdVal,
-            'distance_to_hub': location, 'gimbal_pos': 0,
-            'temperature': 0, 'timestamp': 0, 'mm_px': pixelSize
+            id: idCounter,
+            workorder: workorderId,
+            turbine: turbineName,
+            blade: bladeSn,
+            region: region,
+            image_id: imageIdVal,
+            distance_to_hub: location,
+            gimbal_pos: 0,
+            temperature: 0,
+            timestamp: 0,
+            mm_px: pixelSize,
           })
 
           matchedRows.push({
-            'wind_farm': windFarm, 'turbine_name': turbineName,
-            'turbine_id': turbineId, 'workorder_id': workorderId,
-            'equipment_id': equipmentId, 'surface': surface,
-            'blade_position': bladePosition, 'blade_sn': bladeSn,
-            'region': region,
-            'sequence_direction': isTipToRoot ? 'TipToRoot' : 'RootToTip',
-            'location': location,
-            'json_date_image_utc': item.image_metadata?.date_image || '',
-            'json_original_file_name': originalName,
-            'json_image_file_path': item.image_metadata?.image_file_path || '',
-            'expected_sequence': idCounter,
-            'matched_file': matchedFile,
-            'matched_sequence': idCounter,
-            'sequence_match': 1, 'delta_seconds': 0, 'flag_far_match': 0
+            wind_farm: windFarm,
+            turbine_name: turbineName,
+            turbine_id: turbineId,
+            workorder_id: workorderId,
+            equipment_id: equipmentId,
+            surface: surface,
+            blade_position: bladePosition,
+            blade_sn: bladeSn,
+            region: region,
+            sequence_direction: isTipToRoot ? 'TipToRoot' : 'RootToTip',
+            location: location,
+            json_date_image_utc: item.image_metadata?.date_image || '',
+            json_original_file_name: originalName,
+            json_image_file_path: item.image_metadata?.image_file_path || '',
+            expected_sequence: idCounter,
+            matched_file: matchedFile,
+            matched_sequence: idCounter,
+            sequence_match: 1,
+            delta_seconds: 0,
+            flag_far_match: 0,
           })
           idCounter++
         })
@@ -2853,45 +3616,90 @@ export async function processarJson(jsonPath: string, webContents?: any): Promis
       // Write CSV per blade
       const safeKey = key.replace(/[\/*?:"<>|]/g, '').trim()
       const outCsv = path.join(rootFolder, `photo_data_${safeKey}.csv`)
-      const headers = ['id', 'workorder', 'turbine', 'blade', 'region', 'image_id', 'distance_to_hub', 'gimbal_pos', 'temperature', 'timestamp', 'mm_px']
+      const headers = [
+        'id',
+        'workorder',
+        'turbine',
+        'blade',
+        'region',
+        'image_id',
+        'distance_to_hub',
+        'gimbal_pos',
+        'temperature',
+        'timestamp',
+        'mm_px',
+      ]
       const csvLines = [headers.join(',')]
       rows.forEach(r => {
         csvLines.push(headers.map(h => r[h]).join(','))
       })
       fs.writeFileSync(outCsv, csvLines.join('\n'), 'utf-8')
-      sendLog(`✔ Gerado: photo_data_${safeKey}.csv`, "success")
+      sendLog(`✔ Gerado: photo_data_${safeKey}.csv`, 'success')
     }
 
     // Write matched CSV
-    const matchedHeaders = ['wind_farm', 'turbine_name', 'turbine_id', 'workorder_id', 'equipment_id', 'surface', 'blade_position', 'blade_sn', 'region', 'sequence_direction', 'location', 'json_date_image_utc', 'json_original_file_name', 'json_image_file_path', 'expected_sequence', 'matched_file', 'matched_sequence', 'sequence_match', 'delta_seconds', 'flag_far_match']
+    const matchedHeaders = [
+      'wind_farm',
+      'turbine_name',
+      'turbine_id',
+      'workorder_id',
+      'equipment_id',
+      'surface',
+      'blade_position',
+      'blade_sn',
+      'region',
+      'sequence_direction',
+      'location',
+      'json_date_image_utc',
+      'json_original_file_name',
+      'json_image_file_path',
+      'expected_sequence',
+      'matched_file',
+      'matched_sequence',
+      'sequence_match',
+      'delta_seconds',
+      'flag_far_match',
+    ]
     const matchedLines = [matchedHeaders.join(',')]
     matchedRows.forEach(r => {
-      matchedLines.push(matchedHeaders.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(','))
+      matchedLines.push(
+        matchedHeaders
+          .map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`)
+          .join(',')
+      )
     })
-    fs.writeFileSync(path.join(rootFolder, "photo_data_matched.csv"), matchedLines.join('\n'), 'utf-8')
-    sendLog("✔ photo_data_matched.csv gerado", "success")
+    fs.writeFileSync(
+      path.join(rootFolder, 'photo_data_matched.csv'),
+      matchedLines.join('\n'),
+      'utf-8'
+    )
+    sendLog('✔ photo_data_matched.csv gerado', 'success')
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao processar JSON: ${err.message}`, "error")
+    sendLog(`Erro ao processar JSON: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function organizarFotosJson(jsonPath: string, sourceFolder: string, webContents?: any): Promise<any> {
+export async function organizarFotosJson(
+  jsonPath: string,
+  sourceFolder: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Lendo arquivo JSON...", "info")
+    sendLog('Lendo arquivo JSON...', 'info')
     const data = cryptoService.loadJson(jsonPath, [], true)
     const windblades = data.windblades || []
     if (windblades.length === 0) {
-      return { success: false, error: "Nenhum windblade encontrado no JSON." }
+      return { success: false, error: 'Nenhum windblade encontrado no JSON.' }
     }
 
-    sendLog("Mapeando fotos da pasta de origem...", "info")
+    sendLog('Mapeando fotos da pasta de origem...', 'info')
     // Cache dedicado deste módulo (chave por nome em minúsculas, sem normalização extra,
     // último arquivo encontrado vence em caso de colisão) — igual ao organizar_fotos_api
     // do Python, que é mais simples que o _build_image_cache usado nos outros módulos.
@@ -2915,7 +3723,11 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
     for (let idx = 0; idx < windblades.length; idx++) {
       const item = windblades[idx]
       if (idx % 10 === 0 || idx === windblades.length - 1) {
-        if (webContents) webContents.send('arthprogress', { current: idx + 1, total: windblades.length })
+        if (webContents)
+          webContents.send('arthprogress', {
+            current: idx + 1,
+            total: windblades.length,
+          })
       }
 
       const meta = item.image_metadata || {}
@@ -2943,83 +3755,117 @@ export async function organizarFotosJson(jsonPath: string, sourceFolder: string,
     }
 
     if (missing.length === 0) {
-      sendLog(`${copied}/${windblades.length} fotos organizadas com sucesso`, "success")
-      sendLog(`Output: ${rootFolder}`, "info")
+      sendLog(
+        `${copied}/${windblades.length} fotos organizadas com sucesso`,
+        'success'
+      )
+      sendLog(`Output: ${rootFolder}`, 'info')
     } else {
-      sendLog(`${copied}/${windblades.length} fotos organizadas · ${missing.length} não encontradas`, "warning")
-      sendLog(`Output: ${rootFolder}`, "info")
-      const reportName = _writeMissingFile(rootFolder, missing, "Organizar Fotos via JSON")
-      sendLog(`Lista de ausentes salva em ${reportName}`, "warning")
+      sendLog(
+        `${copied}/${windblades.length} fotos organizadas · ${missing.length} não encontradas`,
+        'warning'
+      )
+      sendLog(`Output: ${rootFolder}`, 'info')
+      const reportName = _writeMissingFile(
+        rootFolder,
+        missing,
+        'Organizar Fotos via JSON'
+      )
+      sendLog(`Lista de ausentes salva em ${reportName}`, 'warning')
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao organizar fotos pelo JSON: ${err.message}`, "error")
+    sendLog(`Erro ao organizar fotos pelo JSON: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function converterCsv(csvPath: string, gerarXlsx: boolean, webContents?: any): Promise<any> {
+export async function converterCsv(
+  csvPath: string,
+  gerarXlsx: boolean,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Lendo CSV...", "info")
+    sendLog('Lendo CSV...', 'info')
     const csvContent = fs.readFileSync(csvPath, 'utf-8').replace(/^\uFEFF/, '')
     let delimiter = ';'
     let lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
     if (lines[0].length === 1 && lines[0][0].includes(',')) {
       delimiter = ','
       lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
-      sendLog("Delimitador ',' detectado no CSV. Lendo corretamente e convertendo...", "info")
+      sendLog(
+        "Delimitador ',' detectado no CSV. Lendo corretamente e convertendo...",
+        'info'
+      )
     }
 
     const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
-    const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
-      const obj: any = {}
-      headers.forEach((h, idx) => {
-        obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+    const rows = lines
+      .slice(1)
+      .filter(l => l.length >= headers.length)
+      .map(l => {
+        const obj: any = {}
+        headers.forEach((h, idx) => {
+          obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+        })
+        return obj
       })
-      return obj
-    })
 
     const outCsv = csvPath.replace(/\.csv$/i, '_convertido.csv')
     const outLines = [headers.map(h => `"${h}"`).join(',')]
     rows.forEach(r => {
-      outLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(','))
+      outLines.push(
+        headers
+          .map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`)
+          .join(',')
+      )
     })
     fs.writeFileSync(outCsv, '\uFEFF' + outLines.join('\n'), 'utf-8')
-    sendLog(`✔ CSV convertido: ${path.basename(outCsv)}`, "success")
+    sendLog(`✔ CSV convertido: ${path.basename(outCsv)}`, 'success')
 
     if (gerarXlsx) {
       const outXlsx = csvPath.replace(/\.csv$/i, '_convertido.xlsx')
       const workbook = new ExcelJS.Workbook()
       writeSheet(workbook, 'Dados Convertidos', rows)
       await workbook.xlsx.writeFile(outXlsx)
-      sendLog(`✔ .xlsx gerado: ${path.basename(outXlsx)}`, "success")
+      sendLog(`✔ .xlsx gerado: ${path.basename(outXlsx)}`, 'success')
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao converter CSV: ${err.message}`, "error")
+    sendLog(`Erro ao converter CSV: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function extrairGpsZ(pasta: string, raizNome: string, webContents?: any): Promise<any> {
+export async function extrairGpsZ(
+  pasta: string,
+  raizNome: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Lendo altitudes de GPS das fotos...", "info")
-    const filePaths = _listImagesFlat(pasta).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
+    sendLog('Lendo altitudes de GPS das fotos...', 'info')
+    const filePaths = _listImagesFlat(pasta).sort((a, b) =>
+      path.basename(a).localeCompare(path.basename(b))
+    )
     const altitudes: Record<string, number> = {}
 
     for (let i = 0; i < filePaths.length; i++) {
       if (i % 10 === 0 || i === filePaths.length - 1) {
-        if (webContents) webContents.send('arthprogress', { current: i + 1, total: filePaths.length })
+        if (webContents)
+          webContents.send('arthprogress', {
+            current: i + 1,
+            total: filePaths.length,
+          })
       }
       const alt = await extractGpsAltitude(filePaths[i])
       if (alt !== null) {
@@ -3028,11 +3874,14 @@ export async function extrairGpsZ(pasta: string, raizNome: string, webContents?:
     }
 
     if (altitudes[raizNome] === undefined) {
-      return { success: false, error: `Foto raiz '${raizNome}' não encontrada ou sem GPS.` }
+      return {
+        success: false,
+        error: `Foto raiz '${raizNome}' não encontrada ou sem GPS.`,
+      }
     }
 
     const altitudeRaiz = altitudes[raizNome]
-    sendLog(`Raiz (Z=0): ${raizNome} (${altitudeRaiz.toFixed(3)} m)`, "info")
+    sendLog(`Raiz (Z=0): ${raizNome} (${altitudeRaiz.toFixed(3)} m)`, 'info')
 
     const resultados = Object.entries(altitudes)
       .sort((a, b) => a[1] - b[1])
@@ -3041,66 +3890,90 @@ export async function extrairGpsZ(pasta: string, raizNome: string, webContents?:
         return {
           nome,
           altitude_gps_m: parseFloat(alt.toFixed(3)),
-          z_relativo_mm: parseFloat(zRel.toFixed(1))
+          z_relativo_mm: parseFloat(zRel.toFixed(1)),
         }
       })
 
-    const outCsv = path.join(pasta, "gps_z_relativo.csv")
+    const outCsv = path.join(pasta, 'gps_z_relativo.csv')
     const headers = ['nome', 'altitude_gps_m', 'z_relativo_mm']
     const csvLines = [headers.join(',')]
     resultados.forEach(r => {
       csvLines.push(`${r.nome},${r.altitude_gps_m},${r.z_relativo_mm}`)
     })
     fs.writeFileSync(outCsv, csvLines.join('\n'), 'utf-8')
-    sendLog(`gps_z_relativo.csv gerado (${resultados.length} linhas)`, "success")
+    sendLog(
+      `gps_z_relativo.csv gerado (${resultados.length} linhas)`,
+      'success'
+    )
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao extrair GPS Z: ${err.message}`, "error")
+    sendLog(`Erro ao extrair GPS Z: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function corrigirZ0(csvPath: string, fotosDir: string, raizNome: string, webContents?: any): Promise<any> {
+export async function corrigirZ0(
+  csvPath: string,
+  fotosDir: string,
+  raizNome: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Carregando CSV...", "info")
+    sendLog('Carregando CSV...', 'info')
     const csvContent = fs.readFileSync(csvPath, 'utf-8')
     let delimiter = ';'
     if (!csvContent.includes(';')) delimiter = ','
 
     const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
     const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
-    const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
-      const obj: any = {}
-      headers.forEach((h, idx) => {
-        obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+    const rows = lines
+      .slice(1)
+      .filter(l => l.length >= headers.length)
+      .map(l => {
+        const obj: any = {}
+        headers.forEach((h, idx) => {
+          obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+        })
+        return obj
       })
-      return obj
-    })
 
     if (!headers.includes('Location') || !headers.includes('Original Image')) {
-      return { success: false, error: "CSV inválido. Colunas 'Location' e 'Original Image' são necessárias." }
+      return {
+        success: false,
+        error:
+          "CSV inválido. Colunas 'Location' e 'Original Image' são necessárias.",
+      }
     }
 
-    sendLog("Carregando altitudes das fotos...", "info")
+    sendLog('Carregando altitudes das fotos...', 'info')
     const imageCache = _buildImageCache(fotosDir)
     const rootNorm = _normalizeFilename(raizNome)
     const rootPath = imageCache[rootNorm]
 
     if (!rootPath) {
-      return { success: false, error: `Foto raiz '${raizNome}' não encontrada na pasta.` }
+      return {
+        success: false,
+        error: `Foto raiz '${raizNome}' não encontrada na pasta.`,
+      }
     }
 
     const baseAlt = await extractGpsAltitude(rootPath)
     if (baseAlt === null) {
-      return { success: false, error: `Foto raiz '${raizNome}' não possui altitude no GPS.` }
+      return {
+        success: false,
+        error: `Foto raiz '${raizNome}' não possui altitude no GPS.`,
+      }
     }
 
-    sendLog(`Altitude Base (Foto Raiz ${raizNome}): ${baseAlt.toFixed(3)} m`, "info")
+    sendLog(
+      `Altitude Base (Foto Raiz ${raizNome}): ${baseAlt.toFixed(3)} m`,
+      'info'
+    )
     let mudancas = 0
 
     for (let i = 0; i < rows.length; i++) {
@@ -3117,10 +3990,10 @@ export async function corrigirZ0(csvPath: string, fotosDir: string, raizNome: st
             row['Location'] = String(newLoc)
             mudancas++
           } else {
-            sendLog(`⚠ Foto sem GPS ignorada: ${name}`, "warning")
+            sendLog(`⚠ Foto sem GPS ignorada: ${name}`, 'warning')
           }
         } else {
-          sendLog(`⚠ Foto não encontrada ignorada: ${name}`, "warning")
+          sendLog(`⚠ Foto não encontrada ignorada: ${name}`, 'warning')
         }
       }
     }
@@ -3129,36 +4002,50 @@ export async function corrigirZ0(csvPath: string, fotosDir: string, raizNome: st
       const outCsv = csvPath.replace(/\.csv$/i, '_Z_corrigido.csv')
       const outLines = [headers.map(h => `"${h}"`).join(';')]
       rows.forEach(r => {
-        outLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(';'))
+        outLines.push(
+          headers
+            .map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`)
+            .join(';')
+        )
       })
       fs.writeFileSync(outCsv, '\uFEFF' + outLines.join('\n'), 'utf-8')
-      sendLog(`✔ Correção de Z aplicada! ${mudancas} itens zerados corrigidos.`, "success")
-      sendLog(`Salvo como: ${path.basename(outCsv)}`, "success")
+      sendLog(
+        `✔ Correção de Z aplicada! ${mudancas} itens zerados corrigidos.`,
+        'success'
+      )
+      sendLog(`Salvo como: ${path.basename(outCsv)}`, 'success')
     } else {
-      sendLog("Nenhuma alteração foi realizada (Nenhum Location=0 precisou de reparo)", "info")
+      sendLog(
+        'Nenhuma alteração foi realizada (Nenhum Location=0 precisou de reparo)',
+        'info'
+      )
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao corrigir Z=0: ${err.message}`, "error")
+    sendLog(`Erro ao corrigir Z=0: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string, webContents?: any): Promise<any> {
+export async function recuperarFotosPerdidas(
+  jsonPath: string,
+  fotosDir: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Lendo arquivo JSON...", "info")
+    sendLog('Lendo arquivo JSON...', 'info')
     const data = cryptoService.loadJson(jsonPath, [], true)
     const windblades = data.windblades || []
     if (windblades.length === 0) {
-      return { success: false, error: "Nenhum windblade encontrado no JSON." }
+      return { success: false, error: 'Nenhum windblade encontrado no JSON.' }
     }
 
-    sendLog("Montando cache de fotos do SD Card...", "info")
+    sendLog('Montando cache de fotos do SD Card...', 'info')
     const imageCache = _buildImageCache(fotosDir, sendLog)
 
     // Group by blade & region (chave interna arbitrária — a região real fica guardada no
@@ -3171,7 +4058,7 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
       groups[key].items.push(wb)
     })
 
-    const outDir = path.join(path.dirname(jsonPath), "Fotos_Recuperadas")
+    const outDir = path.join(path.dirname(jsonPath), 'Fotos_Recuperadas')
     const resultados: any[] = []
 
     for (const { region, items: photos } of Object.values(groups)) {
@@ -3223,7 +4110,8 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
         const before = photoMap[beforeSeq]
 
         let afterSeq = gapEnd + 1
-        while (afterSeq <= nums[nums.length - 1] && !photoMap[afterSeq]) afterSeq++
+        while (afterSeq <= nums[nums.length - 1] && !photoMap[afterSeq])
+          afterSeq++
         const after = photoMap[afterSeq]
 
         if (!before || !after) continue
@@ -3236,7 +4124,10 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
           const tAfter = extractDjiTimestamp(afterName)
           if (tBefore.getTime() === 0 || tAfter.getTime() === 0) continue
 
-          sendLog(`Buscando foto perdida ${m} (entre ${tBefore.toLocaleTimeString()} e ${tAfter.toLocaleTimeString()})`, "info")
+          sendLog(
+            `Buscando foto perdida ${m} (entre ${tBefore.toLocaleTimeString()} e ${tAfter.toLocaleTimeString()})`,
+            'info'
+          )
 
           let encontradaPath: string | null = null
           const targetStr = `_${String(m).padStart(4, '0')}_`
@@ -3255,15 +4146,17 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
             const altEncontrada = await extractGpsAltitude(encontradaPath)
             const beforeNorm = _normalizeFilename(beforeName)
             const beforeFile = imageCache[beforeNorm]
-            const altBefore = beforeFile ? await extractGpsAltitude(beforeFile) : null
+            const altBefore = beforeFile
+              ? await extractGpsAltitude(beforeFile)
+              : null
 
             let location = 0
-            let locType = "Média Interp."
+            let locType = 'Média Interp.'
 
             if (altEncontrada !== null && altBefore !== null) {
               const locBefore = parseFloat(before.image_metadata?.location || 0)
-              location = locBefore + ((altEncontrada - altBefore) * 1000)
-              locType = "GPS Precisão"
+              location = locBefore + (altEncontrada - altBefore) * 1000
+              locType = 'GPS Precisão'
             }
 
             // Fallback pra média entre vizinhos sempre que o cálculo por GPS não rendeu
@@ -3279,14 +4172,17 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
             const px2 = parseFloat(after.image_metadata?.pixel_size || 0)
             const pixelSize = (px1 + px2) / 2
 
-            const turbineName = data.turbine_name || "UNKNOWN"
-            const bladeSn = before.blade_sn || "UNKNOWN"
+            const turbineName = data.turbine_name || 'UNKNOWN'
+            const bladeSn = before.blade_sn || 'UNKNOWN'
 
             const newFn = `${turbineName}_${bladeSn}_${region}_${location.toFixed(2)}_${pixelSize.toFixed(3)}_${path.basename(encontradaPath)}`
             const destPath = path.join(outDir, newFn)
 
             fs.copyFileSync(encontradaPath, destPath)
-            sendLog(`✔ Recuperada: ${path.basename(encontradaPath)} -> ${newFn} (Z via ${locType})`, "success")
+            sendLog(
+              `✔ Recuperada: ${path.basename(encontradaPath)} -> ${newFn} (Z via ${locType})`,
+              'success'
+            )
 
             resultados.push({
               region,
@@ -3294,7 +4190,7 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
               pixel_size: parseFloat(pixelSize.toFixed(3)),
               turbine_name: turbineName,
               blade_sn: bladeSn,
-              image: path.basename(encontradaPath)
+              image: path.basename(encontradaPath),
             })
           }
         }
@@ -3302,8 +4198,15 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
     }
 
     if (resultados.length > 0) {
-      const csvPath = path.join(outDir, "relatorio_fotos_recuperadas.csv")
-      const headers = ['region', 'location', 'pixel_size', 'turbine_name', 'blade_sn', 'image']
+      const csvPath = path.join(outDir, 'relatorio_fotos_recuperadas.csv')
+      const headers = [
+        'region',
+        'location',
+        'pixel_size',
+        'turbine_name',
+        'blade_sn',
+        'image',
+      ]
       const csvEscape = (v: any) => {
         const s = String(v ?? '')
         return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
@@ -3313,28 +4216,36 @@ export async function recuperarFotosPerdidas(jsonPath: string, fotosDir: string,
         csvLines.push(headers.map(h => csvEscape(r[h])).join(';'))
       })
       fs.writeFileSync(csvPath, '\uFEFF' + csvLines.join('\n'), 'utf-8')
-      sendLog(`Operação concluída. ${resultados.length} fotos salvas na pasta: Fotos_Recuperadas`, "success")
+      sendLog(
+        `Operação concluída. ${resultados.length} fotos salvas na pasta: Fotos_Recuperadas`,
+        'success'
+      )
     } else {
-      sendLog("Nenhuma foto faltando foi detectada ou recuperada.", "warning")
+      sendLog('Nenhuma foto faltando foi detectada ou recuperada.', 'warning')
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao recuperar fotos: ${err.message}`, "error")
+    sendLog(`Erro ao recuperar fotos: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function carregarFotosReconstruir(pasta: string, webContents?: any): Promise<any[]> {
+export async function carregarFotosReconstruir(
+  pasta: string,
+  webContents?: any
+): Promise<any[]> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    const filePaths = _listImagesFlat(pasta).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
+    const filePaths = _listImagesFlat(pasta).sort((a, b) =>
+      path.basename(a).localeCompare(path.basename(b))
+    )
 
     if (filePaths.length === 0) {
-      sendLog("Nenhuma foto .JPG/.JPEG encontrada na pasta.", "error")
+      sendLog('Nenhuma foto .JPG/.JPEG encontrada na pasta.', 'error')
       return []
     }
 
@@ -3345,25 +4256,30 @@ export async function carregarFotosReconstruir(pasta: string, webContents?: any)
     }
 
     if (Object.keys(altitudes).length === 0) {
-      sendLog("Nenhuma foto com dado GPS encontrada.", "error")
+      sendLog('Nenhuma foto com dado GPS encontrada.', 'error')
       return []
     }
 
-    const firstGpsName = filePaths.map(f => path.basename(f)).find(name => altitudes[name] !== undefined)
+    const firstGpsName = filePaths
+      .map(f => path.basename(f))
+      .find(name => altitudes[name] !== undefined)
     if (!firstGpsName) return []
     const altitudeRaiz = altitudes[firstGpsName]
 
     const resultado = filePaths.map(f => {
       const name = path.basename(f)
-      const z = altitudes[name] !== undefined ? parseFloat(((altitudes[name] - altitudeRaiz) * 1000).toFixed(1)) : null
+      const z =
+        altitudes[name] !== undefined
+          ? parseFloat(((altitudes[name] - altitudeRaiz) * 1000).toFixed(1))
+          : null
       return { nome: name, z_relativo_mm: z }
     })
 
     const semGps = resultado.filter(r => r.z_relativo_mm === null).length
-    sendLog(`${resultado.length} fotos carregadas · ${semGps} sem GPS.`, "info")
+    sendLog(`${resultado.length} fotos carregadas · ${semGps} sem GPS.`, 'info')
     return resultado
   } catch (err: any) {
-    sendLog(`Erro ao carregar fotos para reconstruir: ${err.message}`, "error")
+    sendLog(`Erro ao carregar fotos para reconstruir: ${err.message}`, 'error')
     return []
   }
 }
@@ -3385,7 +4301,7 @@ export async function reconstruirCsv(
       .sort((a, b) => a.localeCompare(b))
 
     if (photoList.length === 0) {
-      return { success: false, error: "Nenhuma foto encontrada na pasta." }
+      return { success: false, error: 'Nenhuma foto encontrada na pasta.' }
     }
 
     const altitudes: Record<string, number> = {}
@@ -3400,7 +4316,9 @@ export async function reconstruirCsv(
     const photoZ: Record<string, number> = {}
     photoList.forEach(nome => {
       if (altitudeRaiz !== null && altitudes[nome] !== undefined) {
-        photoZ[nome] = parseFloat(((altitudes[nome] - altitudeRaiz) * 1000).toFixed(1))
+        photoZ[nome] = parseFloat(
+          ((altitudes[nome] - altitudeRaiz) * 1000).toFixed(1)
+        )
       } else {
         photoZ[nome] = 0
       }
@@ -3410,14 +4328,19 @@ export async function reconstruirCsv(
     const usedIndices = new Set<number>()
 
     for (const sideDef of sides) {
-      const side = String(sideDef.side || '').trim().toUpperCase()
+      const side = String(sideDef.side || '')
+        .trim()
+        .toUpperCase()
       const start = String(sideDef.start || '').trim()
       const end = String(sideDef.end || '').trim()
       const pixelMmAvg = parseFloat(sideDef.pixel_mm_avg || 0.45)
 
       if (!side || !start || !end) continue
       if (!photoList.includes(start) || !photoList.includes(end)) {
-        sendLog(`⚠ Foto início/fim não encontrada para o lado ${side}`, "warning")
+        sendLog(
+          `⚠ Foto início/fim não encontrada para o lado ${side}`,
+          'warning'
+        )
         continue
       }
 
@@ -3433,7 +4356,10 @@ export async function reconstruirCsv(
         .map(i => startIdx + i)
         .filter(idx => usedIndices.has(idx)).length
       if (overlapCount > 0) {
-        sendLog(`⚠ Lado ${side}: ${overlapCount} foto(s) já atribuídas a outro lado — sobreposição removida.`, "warning")
+        sendLog(
+          `⚠ Lado ${side}: ${overlapCount} foto(s) já atribuídas a outro lado — sobreposição removida.`,
+          'warning'
+        )
       }
 
       const sidePhotos = photoList
@@ -3447,39 +4373,52 @@ export async function reconstruirCsv(
       const isTipToRoot = side === 'SS' || side === 'PS'
       if (isTipToRoot) {
         sidePhotos.reverse()
-        sendLog(`  ↩ Lado ${side}: ordem invertida (tip→root)`, "info")
+        sendLog(`  ↩ Lado ${side}: ordem invertida (tip→root)`, 'info')
       }
 
       sidePhotos.forEach(nome => {
-        const pixelMm = parseFloat((pixelMmAvg + (Math.random() * 0.03 - 0.015)).toFixed(5))
+        const pixelMm = parseFloat(
+          (pixelMmAvg + (Math.random() * 0.03 - 0.015)).toFixed(5)
+        )
         rows.push({
           'Blade SN': bladeSn,
-          'Side': side,
+          Side: side,
           'Original Image': nome,
-          'Location': roundHalfToEven(photoZ[nome] || 0),
-          'Pixel MM': pixelMm
+          Location: roundHalfToEven(photoZ[nome] || 0),
+          'Pixel MM': pixelMm,
         })
       })
-      sendLog(`✔ Lado ${side}: ${sidePhotos.length} fotos`, "success")
+      sendLog(`✔ Lado ${side}: ${sidePhotos.length} fotos`, 'success')
     }
 
     if (rows.length === 0) {
-      return { success: false, error: "Nenhuma linha gerada. Verifique as configurações de lado." }
+      return {
+        success: false,
+        error: 'Nenhuma linha gerada. Verifique as configurações de lado.',
+      }
     }
 
     const safeSn = bladeSn.replace(/[\/*?:"<>|]/g, '').trim()
     const outCsv = path.join(pasta, `${safeSn}_reconstruido.csv`)
-    const headers = ['Blade SN', 'Side', 'Original Image', 'Location', 'Pixel MM']
+    const headers = [
+      'Blade SN',
+      'Side',
+      'Original Image',
+      'Location',
+      'Pixel MM',
+    ]
     const csvLines = [headers.join(';')]
     rows.forEach(r => {
-      csvLines.push(`${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`)
+      csvLines.push(
+        `${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`
+      )
     })
     fs.writeFileSync(outCsv, '\uFEFF' + csvLines.join('\n'), 'utf-8')
-    sendLog(`✔ CSV reconstruído: ${path.basename(outCsv)}`, "success")
+    sendLog(`✔ CSV reconstruído: ${path.basename(outCsv)}`, 'success')
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro na reconstrução: ${err.message}`, "error")
+    sendLog(`Erro na reconstrução: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
@@ -3499,24 +4438,35 @@ export async function reconstruirCsvMulti(
   try {
     let refDataTop: any = {}
     const refByPosRgn: Record<string, Record<string, any[]>> = {}
-    
+
     if (jsonRefPath && fs.existsSync(jsonRefPath)) {
       try {
         const refData = cryptoService.loadJson(jsonRefPath, [], true)
         refDataTop = { ...refData }
         delete refDataTop.windblades
-        
+
         const windblades = refData.windblades || []
         windblades.forEach((entry: any) => {
-          const pos = String(entry.blade_position || '').trim().toUpperCase() || 'ALL'
-          const rgn = String(entry.region || '').trim().toUpperCase()
+          const pos =
+            String(entry.blade_position || '')
+              .trim()
+              .toUpperCase() || 'ALL'
+          const rgn = String(entry.region || '')
+            .trim()
+            .toUpperCase()
           if (!refByPosRgn[pos]) refByPosRgn[pos] = {}
           if (!refByPosRgn[pos][rgn]) refByPosRgn[pos][rgn] = []
           refByPosRgn[pos][rgn].push(entry)
         })
-        sendLog(`✔ JSON de referência carregado: ${path.basename(jsonRefPath)}`, "info")
+        sendLog(
+          `✔ JSON de referência carregado: ${path.basename(jsonRefPath)}`,
+          'info'
+        )
       } catch (err: any) {
-        sendLog(`⚠ Não foi possível carregar JSON de referência: ${err.message}`, "warning")
+        sendLog(
+          `⚠ Não foi possível carregar JSON de referência: ${err.message}`,
+          'warning'
+        )
       }
     }
 
@@ -3532,18 +4482,18 @@ export async function reconstruirCsvMulti(
       const sidesConfig = tab.sides || []
 
       if (!fs.existsSync(pasta)) {
-        sendLog(`⚠ Pá ${bladeLabel}: pasta não encontrada.`, "warning")
+        sendLog(`⚠ Pá ${bladeLabel}: pasta não encontrada.`, 'warning')
         continue
       }
 
-      sendLog(`── Pá ${bladeLabel} ── ${path.basename(pasta)}`, "info")
+      sendLog(`── Pá ${bladeLabel} ── ${path.basename(pasta)}`, 'info')
       const flatFiles = _listImagesFlat(pasta)
       const photoList = flatFiles
         .map(f => path.basename(f))
         .sort((a, b) => a.localeCompare(b))
 
       if (photoList.length === 0) {
-        sendLog(`⚠ Pá ${bladeLabel}: nenhuma foto encontrada.`, "warning")
+        sendLog(`⚠ Pá ${bladeLabel}: nenhuma foto encontrada.`, 'warning')
         continue
       }
 
@@ -3558,7 +4508,9 @@ export async function reconstruirCsvMulti(
       const photoZ: Record<string, number> = {}
       photoList.forEach(nome => {
         if (altitudeRaiz !== null && altitudes[nome] !== undefined) {
-          photoZ[nome] = parseFloat(((altitudes[nome] - altitudeRaiz) * 1000).toFixed(1))
+          photoZ[nome] = parseFloat(
+            ((altitudes[nome] - altitudeRaiz) * 1000).toFixed(1)
+          )
         } else {
           photoZ[nome] = 0
         }
@@ -3569,14 +4521,19 @@ export async function reconstruirCsvMulti(
       const usedIdx = new Set<number>()
 
       for (const sideDef of sidesConfig) {
-        const side = String(sideDef.side || '').trim().toUpperCase()
+        const side = String(sideDef.side || '')
+          .trim()
+          .toUpperCase()
         const start = String(sideDef.start || '').trim()
         const end = String(sideDef.end || '').trim()
         const pixelMmAvg = parseFloat(sideDef.pixel_mm_avg || 0.45)
 
         if (!side || !start || !end) continue
         if (!photoList.includes(start) || !photoList.includes(end)) {
-          sendLog(`⚠ Pá ${bladeLabel} lado ${side}: foto início/fim não encontrada.`, "warning")
+          sendLog(
+            `⚠ Pá ${bladeLabel} lado ${side}: foto início/fim não encontrada.`,
+            'warning'
+          )
           continue
         }
 
@@ -3592,7 +4549,10 @@ export async function reconstruirCsvMulti(
           .map(i => si + i)
           .filter(idx => usedIdx.has(idx)).length
         if (overlapCount > 0) {
-          sendLog(`⚠ Pá ${bladeLabel} lado ${side}: ${overlapCount} foto(s) já atribuídas a outro lado — sobreposição removida.`, "warning")
+          sendLog(
+            `⚠ Pá ${bladeLabel} lado ${side}: ${overlapCount} foto(s) já atribuídas a outro lado — sobreposição removida.`,
+            'warning'
+          )
         }
 
         let sidePhotos = photoList
@@ -3606,51 +4566,93 @@ export async function reconstruirCsvMulti(
         const isTipToRoot = side === 'SS' || side === 'PS'
         if (isTipToRoot) {
           sidePhotos.reverse()
-          sendLog(`  ↩ Lado ${side}: ordem invertida (tip→root)`, "info")
+          sendLog(`  ↩ Lado ${side}: ordem invertida (tip→root)`, 'info')
         }
 
         sidePhotos.forEach(nome => {
-          const pixelMm = parseFloat((pixelMmAvg + (Math.random() * 0.03 - 0.015)).toFixed(5))
+          const pixelMm = parseFloat(
+            (pixelMmAvg + (Math.random() * 0.03 - 0.015)).toFixed(5)
+          )
           const z = roundHalfToEven(photoZ[nome] || 0)
-          rowsM1.push({ 'Blade SN': bladeSn, 'Side': side, 'Original Image': nome, 'Location': z, 'Pixel MM': pixelMm })
-          
+          rowsM1.push({
+            'Blade SN': bladeSn,
+            Side: side,
+            'Original Image': nome,
+            Location: z,
+            'Pixel MM': pixelMm,
+          })
+
           if (genUploaderCsv) {
             rowsUp.push({
-              'id': idCounter, 'workorder': workorder, 'turbine': turbine,
-              'blade': bladeSn, 'region': side, 'image_id': nome,
-              'distance_to_hub': z, 'gimbal_pos': 0, 'temperature': 0,
-              'timestamp': 0, 'mm_px': pixelMm
+              id: idCounter,
+              workorder: workorder,
+              turbine: turbine,
+              blade: bladeSn,
+              region: side,
+              image_id: nome,
+              distance_to_hub: z,
+              gimbal_pos: 0,
+              temperature: 0,
+              timestamp: 0,
+              mm_px: pixelMm,
             })
             idCounter++
           }
         })
-        sendLog(`  ✔ Lado ${side}: ${sidePhotos.length} fotos`, "success")
+        sendLog(`  ✔ Lado ${side}: ${sidePhotos.length} fotos`, 'success')
       }
 
       if (rowsM1.length === 0) {
-        sendLog(`⚠ Pá ${bladeLabel}: nenhuma linha gerada.`, "warning")
+        sendLog(`⚠ Pá ${bladeLabel}: nenhuma linha gerada.`, 'warning')
         continue
       }
 
-      const safeSn = bladeSn.replace(/[\/*?:"<>|]/g, '').trim() || `pa_${bladeLabel}`
+      const safeSn =
+        bladeSn.replace(/[\/*?:"<>|]/g, '').trim() || `pa_${bladeLabel}`
       const outM1 = path.join(pasta, `${safeSn}_reconstruido.csv`)
-      const headersM1 = ['Blade SN', 'Side', 'Original Image', 'Location', 'Pixel MM']
+      const headersM1 = [
+        'Blade SN',
+        'Side',
+        'Original Image',
+        'Location',
+        'Pixel MM',
+      ]
       const m1Lines = [headersM1.join(';')]
       rowsM1.forEach(r => {
-        m1Lines.push(`${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`)
+        m1Lines.push(
+          `${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`
+        )
       })
       fs.writeFileSync(outM1, '\uFEFF' + m1Lines.join('\n'), 'utf-8')
-      sendLog(`✔ Pá ${bladeLabel}: ${path.basename(outM1)} (${rowsM1.length} linhas)`, "success")
+      sendLog(
+        `✔ Pá ${bladeLabel}: ${path.basename(outM1)} (${rowsM1.length} linhas)`,
+        'success'
+      )
 
       if (genUploaderCsv && rowsUp.length > 0) {
         const outUp = path.join(pasta, `photo_data_${bladeLabel}_${safeSn}.csv`)
-        const headersUp = ['id', 'workorder', 'turbine', 'blade', 'region', 'image_id', 'distance_to_hub', 'gimbal_pos', 'temperature', 'timestamp', 'mm_px']
+        const headersUp = [
+          'id',
+          'workorder',
+          'turbine',
+          'blade',
+          'region',
+          'image_id',
+          'distance_to_hub',
+          'gimbal_pos',
+          'temperature',
+          'timestamp',
+          'mm_px',
+        ]
         const upLines = [headersUp.join(',')]
         rowsUp.forEach(r => {
           upLines.push(headersUp.map(h => r[h]).join(','))
         })
         fs.writeFileSync(outUp, upLines.join('\n'), 'utf-8')
-        sendLog(`✔ Pá ${bladeLabel}: ${path.basename(outUp)} (Image Uploader)`, "success")
+        sendLog(
+          `✔ Pá ${bladeLabel}: ${path.basename(outUp)} (Image Uploader)`,
+          'success'
+        )
       }
 
       // Merge windblades
@@ -3691,8 +4693,8 @@ export async function reconstruirCsvMulti(
                 ...refE.image_metadata,
                 original_file_name: nome,
                 pixel_size: row['Pixel MM'],
-                location: row['Location']
-              }
+                location: row['Location'],
+              },
             })
           })
         })
@@ -3706,8 +4708,8 @@ export async function reconstruirCsvMulti(
             image_metadata: {
               original_file_name: row['Original Image'],
               pixel_size: row['Pixel MM'],
-              location: row['Location']
-            }
+              location: row['Location'],
+            },
           })
         })
       }
@@ -3717,7 +4719,7 @@ export async function reconstruirCsvMulti(
     }
 
     if (outputDirs.length === 0) {
-      return { success: false, error: "Nenhuma pá processada com sucesso." }
+      return { success: false, error: 'Nenhuma pá processada com sucesso.' }
     }
 
     if (allWindblades.length > 0) {
@@ -3741,8 +4743,11 @@ export async function reconstruirCsvMulti(
 
       const parts = [workorder, turbine].filter(p => !!p)
       const hasRef = Object.keys(refByPosRgn).length > 0
-      const suffix = hasRef ? "matched" : "reconstruido"
-      let fname = parts.length > 0 ? `photo_data_${suffix}_${parts.join('_')}.json` : `photo_data_${suffix}.json`
+      const suffix = hasRef ? 'matched' : 'reconstruido'
+      let fname =
+        parts.length > 0
+          ? `photo_data_${suffix}_${parts.join('_')}.json`
+          : `photo_data_${suffix}.json`
       fname = fname.replace(/[\/*?:"<>|]/g, '')
 
       const jsonDoc: any = { ...refDataTop }
@@ -3752,13 +4757,16 @@ export async function reconstruirCsvMulti(
 
       const outJson = path.join(jsonOutDir, fname)
       fs.writeFileSync(outJson, JSON.stringify(jsonDoc, null, 2), 'utf-8')
-      sendLog(`✔ JSON turbina (${suffix}): ${path.basename(outJson)} (${allWindblades.length} entradas)`, "success")
+      sendLog(
+        `✔ JSON turbina (${suffix}): ${path.basename(outJson)} (${allWindblades.length} entradas)`,
+        'success'
+      )
     }
 
-    sendLog(`✔ ${outputDirs.length} pá(s) reconstruída(s).`, "success")
+    sendLog(`✔ ${outputDirs.length} pá(s) reconstruída(s).`, 'success')
     return { success: true, output_dirs: outputDirs }
   } catch (err: any) {
-    sendLog(`Erro na reconstrução multi-blade: ${err.message}`, "error")
+    sendLog(`Erro na reconstrução multi-blade: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
@@ -3792,32 +4800,47 @@ export async function detectarEstruturaAbc(rootPath: string): Promise<any> {
   }
 }
 
-export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webContents?: any): Promise<any> {
+export async function padronizarGoPro(
+  fotosDir: string,
+  dryRun: boolean,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Escaneando fotos GoPro na pasta...", "info")
+    sendLog('Escaneando fotos GoPro na pasta...', 'info')
     const flatFiles = _listImagesFlat(fotosDir)
     const entries: any[] = []
     const skipped: string[] = []
     let selectSideFixed = 0
 
-    const filenameRe = /^.+?--(?<blade>.+?)--(?<region>[A-Za-z]+)_(?<location>\d+)/i
+    const filenameRe =
+      /^.+?--(?<blade>.+?)--(?<region>[A-Za-z]+)_(?<location>\d+)/i
     const fallbackRe = /^.+?--(?<blade>.+?)--[^_]+_(?<location>\d+)/i
 
     for (const fPath of flatFiles) {
       const stem = path.basename(fPath, path.extname(fPath))
       const m = stem.match(filenameRe)
       if (m && m.groups) {
-        entries.push({ blade: m.groups.blade, region: m.groups.region.toUpperCase(), location: parseInt(m.groups.location, 10), filePath: fPath })
+        entries.push({
+          blade: m.groups.blade,
+          region: m.groups.region.toUpperCase(),
+          location: parseInt(m.groups.location, 10),
+          filePath: fPath,
+        })
       } else {
         const fall = stem.match(fallbackRe)
         if (fall && fall.groups) {
           const parentFolder = path.basename(path.dirname(fPath)).toUpperCase()
           if (parentFolder in PACKER_REGION_MAP) {
-            entries.push({ blade: fall.groups.blade, region: parentFolder, location: parseInt(fall.groups.location, 10), filePath: fPath })
+            entries.push({
+              blade: fall.groups.blade,
+              region: parentFolder,
+              location: parseInt(fall.groups.location, 10),
+              filePath: fPath,
+            })
             selectSideFixed++
           } else {
             skipped.push(path.basename(fPath))
@@ -3829,32 +4852,49 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
     }
 
     if (entries.length === 0) {
-      return { success: false, error: "Nenhum arquivo com padrão Arthbot reconhecido." }
+      return {
+        success: false,
+        error: 'Nenhum arquivo com padrão Arthbot reconhecido.',
+      }
     }
 
     if (selectSideFixed > 0) {
-      sendLog(`  ${selectSideFixed} arquivo(s) com região corrigida automaticamente pelo nome da pasta`, "warning")
+      sendLog(
+        `  ${selectSideFixed} arquivo(s) com região corrigida automaticamente pelo nome da pasta`,
+        'warning'
+      )
     }
     if (skipped.length > 0) {
-      sendLog(`${skipped.length} arquivo(s) sem padrão reconhecido ignorados`, "warning")
+      sendLog(
+        `${skipped.length} arquivo(s) sem padrão reconhecido ignorados`,
+        'warning'
+      )
     }
 
     // Group by blade & region (chave interna arbitrária — blade/region reais ficam
     // guardados no próprio grupo, evitando reconstrução via split('_') que quebraria
     // se o blade SN contivesse underscore)
-    const groups: Record<string, { blade: string; region: string; items: any[] }> = {}
+    const groups: Record<
+      string,
+      { blade: string; region: string; items: any[] }
+    > = {}
     entries.forEach(e => {
       const key = `${e.blade} ${e.region}`
-      if (!groups[key]) groups[key] = { blade: e.blade, region: e.region, items: [] }
+      if (!groups[key])
+        groups[key] = { blade: e.blade, region: e.region, items: [] }
       groups[key].items.push(e)
     })
 
     // Sort within each group
     Object.values(groups).forEach(g => {
-      g.items.sort((a, b) => a.location - b.location || path.basename(a.filePath).localeCompare(path.basename(b.filePath)))
+      g.items.sort(
+        (a, b) =>
+          a.location - b.location ||
+          path.basename(a.filePath).localeCompare(path.basename(b.filePath))
+      )
     })
 
-    const outputDir = path.join(path.dirname(fotosDir), "OUTPUT")
+    const outputDir = path.join(path.dirname(fotosDir), 'OUTPUT')
     if (!dryRun && !fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true })
     }
@@ -3872,7 +4912,10 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
         const destPath = path.join(destSubdir, cleanName)
         if (dryRun) {
           if (copied < 5) {
-            sendLog(`  ${path.basename(item.filePath)}  →  ${blade}/${region}/${cleanName}`, "info")
+            sendLog(
+              `  ${path.basename(item.filePath)}  →  ${blade}/${region}/${cleanName}`,
+              'info'
+            )
           }
         } else {
           fs.copyFileSync(item.filePath, destPath)
@@ -3882,20 +4925,29 @@ export async function padronizarGoPro(fotosDir: string, dryRun: boolean, webCont
     })
 
     if (dryRun) {
-      sendLog(`[DRY-RUN] ${copied}/${entries.length} imagens seriam copiadas`, "warning")
+      sendLog(
+        `[DRY-RUN] ${copied}/${entries.length} imagens seriam copiadas`,
+        'warning'
+      )
     } else {
-      sendLog(`${copied}/${entries.length} imagens organizadas com sucesso`, "success")
-      sendLog(`Output: ${outputDir}`, "info")
+      sendLog(
+        `${copied}/${entries.length} imagens organizadas com sucesso`,
+        'success'
+      )
+      sendLog(`Output: ${outputDir}`, 'info')
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao padronizar GoPro: ${err.message}`, "error")
+    sendLog(`Erro ao padronizar GoPro: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function analisarGoProRaw(pastaBlade: string, webContents?: any): Promise<any[]> {
+export async function analisarGoProRaw(
+  pastaBlade: string,
+  webContents?: any
+): Promise<any[]> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
@@ -3932,23 +4984,31 @@ export async function analisarGoProRaw(pastaBlade: string, webContents?: any): P
 
         // Rollover detection
         if (maxN - minN > 8000) {
-          const adjNums = nums.map(n => n < 5000 ? n + 10000 : n).sort((a, b) => a - b)
+          const adjNums = nums
+            .map(n => (n < 5000 ? n + 10000 : n))
+            .sort((a, b) => a - b)
           minN = adjNums[0] >= 10000 ? adjNums[0] - 10000 : adjNums[0]
-          maxN = adjNums[adjNums.length - 1] >= 10000 ? adjNums[adjNums.length - 1] - 10000 : adjNums[adjNums.length - 1]
+          maxN =
+            adjNums[adjNums.length - 1] >= 10000
+              ? adjNums[adjNums.length - 1] - 10000
+              : adjNums[adjNums.length - 1]
         }
 
         resultados.push({
           region,
           num_min: minN,
           num_max: maxN,
-          total: nums.length
+          total: nums.length,
         })
-        sendLog(`  ${region}: ${nums.length} fotos (Cronológico: ${minN} → ${maxN})`, "info")
+        sendLog(
+          `  ${region}: ${nums.length} fotos (Cronológico: ${minN} → ${maxN})`,
+          'info'
+        )
       }
     }
     return resultados
   } catch (err: any) {
-    sendLog(`Erro ao analisar GoPro RAW: ${err.message}`, "error")
+    sendLog(`Erro ao analisar GoPro RAW: ${err.message}`, 'error')
     return []
   }
 }
@@ -3965,7 +5025,11 @@ export async function calibrarZGoProRaw(
   }
 
   try {
-    const output = path.join(path.dirname(pastaBlade), "OUTPUT", `${turbine}--${bladeSn}`)
+    const output = path.join(
+      path.dirname(pastaBlade),
+      'OUTPUT',
+      `${turbine}--${bladeSn}`
+    )
     let totalRenomeados = 0
 
     const list = fs.readdirSync(pastaBlade, { withFileTypes: true })
@@ -3982,12 +5046,18 @@ export async function calibrarZGoProRaw(
         for (const file of files) {
           const ext = path.extname(file).toUpperCase()
           if (ext === '.JPG' || ext === '.JPEG') {
-            fs.copyFileSync(path.join(pastaBlade, subdir.name, file), path.join(outDir, file))
+            fs.copyFileSync(
+              path.join(pastaBlade, subdir.name, file),
+              path.join(outDir, file)
+            )
             vCount++
           }
         }
         if (vCount > 0) {
-          sendLog(`  ${region}: ${vCount} foto(s) VISUAL copiada(s) diretamente`, "success")
+          sendLog(
+            `  ${region}: ${vCount} foto(s) VISUAL copiada(s) diretamente`,
+            'success'
+          )
           totalRenomeados += vCount
         }
         continue
@@ -4009,7 +5079,7 @@ export async function calibrarZGoProRaw(
       for (const file of files) {
         const ext = path.extname(file).toUpperCase()
         if (ext !== '.JPG' && ext !== '.JPEG') continue
-        
+
         const filePath = path.join(regionSubdir, file)
         const stem = path.basename(file, ext)
         const m = stem.match(_GOPRO_NUM_RE)
@@ -4023,12 +5093,18 @@ export async function calibrarZGoProRaw(
       }
 
       if (nonGoproCount > 0) {
-        sendLog(`  ${region}: ${nonGoproCount} foto(s) extra (sem padrão GoPro) copiada(s) diretamente`, "info")
+        sendLog(
+          `  ${region}: ${nonGoproCount} foto(s) extra (sem padrão GoPro) copiada(s) diretamente`,
+          'info'
+        )
         totalRenomeados += nonGoproCount
       }
 
       if (fotos.length === 0) {
-        sendLog(`  ${region}: nenhuma foto GoPro para calibrar Z, pulando.`, "warning")
+        sendLog(
+          `  ${region}: nenhuma foto GoPro para calibrar Z, pulando.`,
+          'warning'
+        )
         continue
       }
 
@@ -4040,17 +5116,28 @@ export async function calibrarZGoProRaw(
       if (rawNums[rawNums.length - 1] - rawNums[0] > 8000) {
         adjFotos = fotos.map(f => ({
           ...f,
-          num: f.num < 5000 ? f.num + 10000 : f.num
+          num: f.num < 5000 ? f.num + 10000 : f.num,
         }))
         adjFotos.sort((a, b) => a.num - b.num)
         if (transition > 0 && transition < 5000) {
           adjTransition = transition + 10000
         }
-        sendLog(`  ${region}: rollover detectado (9999→0001), sequência reordenada.`, "info")
+        sendLog(
+          `  ${region}: rollover detectado (9999→0001), sequência reordenada.`,
+          'info'
+        )
       }
 
-      const pairNote = paired && transition > 0 ? ` (pares até GOPR${transition})` : paired ? " (todos pareados)" : ""
-      sendLog(`  ${region}: ${adjFotos.length} fotos · z_ini=${zInicial} mm · passo=500 mm${pairNote}`, "info")
+      const pairNote =
+        paired && transition > 0
+          ? ` (pares até GOPR${transition})`
+          : paired
+            ? ' (todos pareados)'
+            : ''
+      sendLog(
+        `  ${region}: ${adjFotos.length} fotos · z_ini=${zInicial} mm · passo=500 mm${pairNote}`,
+        'info'
+      )
 
       let count = 0
       let currentPos = 0
@@ -4081,7 +5168,7 @@ export async function calibrarZGoProRaw(
         const stats = fs.statSync(item.filePath)
         const mtime = new Date(stats.mtimeMs)
         const dateStr = `${String(mtime.getMonth() + 1).padStart(2, '0')}-${String(mtime.getDate()).padStart(2, '0')}-${mtime.getFullYear()}`
-        
+
         const ext = path.extname(item.filePath)
         const stem = path.basename(item.filePath, ext)
         const newName = `${turbine}--${bladeSn}--${region}_${z}_${stem}-0---${dateStr}.JPG`
@@ -4090,36 +5177,40 @@ export async function calibrarZGoProRaw(
         count++
       }
 
-      sendLog(`  ${region}: ${count} foto(s) renomeada(s)`, "success")
+      sendLog(`  ${region}: ${count} foto(s) renomeada(s)`, 'success')
       totalRenomeados += count
     }
 
     if (totalRenomeados > 0) {
-      sendLog(`Concluído: ${totalRenomeados} foto(s) gerada(s)`, "success")
-      sendLog(`Output: ${output}`, "info")
+      sendLog(`Concluído: ${totalRenomeados} foto(s) gerada(s)`, 'success')
+      sendLog(`Output: ${output}`, 'info')
     }
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro na calibração GoPro: ${err.message}`, "error")
+    sendLog(`Erro na calibração GoPro: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webContents?: any): Promise<any> {
+export async function vincularArthnexCsv(
+  csvPath: string,
+  fotosDir: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    sendLog("Iniciando vínculo Arthnex ↔ CSV...", "info")
-    sendLog("Escaneando fotos exportadas...", "info")
+    sendLog('Iniciando vínculo Arthnex ↔ CSV...', 'info')
+    sendLog('Escaneando fotos exportadas...', 'info')
 
     const parseArthnexFilename = (filename: string, filepath: string) => {
       const pattern = /^(.+?)--(.+?)--(.+?)_(-?[\d.]+)_(\d+)-\d+\.[jJ][pP][gG]$/
       const match = filename.match(pattern)
       if (!match) return null
-      
+
       const parentFolder = path.basename(path.dirname(filepath))
       return {
         parque: match[1],
@@ -4129,7 +5220,7 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
         platform_order: parseInt(match[5], 10),
         side: parentFolder,
         filename,
-        filepath
+        filepath,
       }
     }
 
@@ -4149,12 +5240,15 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
     walk(fotosDir)
 
     if (fotos.length === 0) {
-      return { success: false, error: "Nenhuma foto no padrão Arthnex encontrada no diretório." }
+      return {
+        success: false,
+        error: 'Nenhuma foto no padrão Arthnex encontrada no diretório.',
+      }
     }
 
-    sendLog(`Encontradas ${fotos.length} fotos Arthnex.`, "info")
+    sendLog(`Encontradas ${fotos.length} fotos Arthnex.`, 'info')
 
-    sendLog("Lendo CSV...", "info")
+    sendLog('Lendo CSV...', 'info')
     const csvContent = fs.readFileSync(csvPath, 'utf-8').replace(/^\uFEFF/, '')
     let delimiter = ';'
     let lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
@@ -4164,13 +5258,16 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
       lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
       headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
     }
-    const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
-      const obj: any = {}
-      headers.forEach((h, idx) => {
-        obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+    const rows = lines
+      .slice(1)
+      .filter(l => l.length >= headers.length)
+      .map(l => {
+        const obj: any = {}
+        headers.forEach((h, idx) => {
+          obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+        })
+        return obj
       })
-      return obj
-    })
 
     // Tolerante a colunas ausentes (como o csv.DictReader do Python) — só pula a linha
     // se blade_sn ou original_image vierem vazios, em vez de rejeitar o CSV inteiro.
@@ -4180,11 +5277,11 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
         location: parseFloat(r['Location']) || 0,
         side: String(r['Side'] || '').trim(),
         original_image: String(r['Original Image'] || '').trim(),
-        row_data: r
+        row_data: r,
       }))
       .filter(l => l.blade_sn && l.original_image)
 
-    sendLog(`Lidas ${linhasCsv.length} linhas do CSV.`, "info")
+    sendLog(`Lidas ${linhasCsv.length} linhas do CSV.`, 'info')
 
     // Grouping
     const fotosGrupos: Record<string, any[]> = {}
@@ -4213,7 +5310,7 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
     linhasCsv.forEach(l => {
       const key = `${l.blade_sn}_${l.side}_${l.location}`
       let matchedKey = key
-      
+
       if (!fotosGrupos[key]) {
         // Try inverted side (SS <-> PS)
         let invertedSide = ''
@@ -4243,7 +5340,7 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
       for (let i = 0; i < minCount; i++) {
         matches.push({
           foto: fList[i],
-          csv_row: cRows[i]
+          csv_row: cRows[i],
         })
       }
 
@@ -4275,17 +5372,27 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
     })
 
     if (matches.length === 0) {
-      return { success: false, error: "Nenhum vínculo encontrado entre CSV e as Fotos!" }
+      return {
+        success: false,
+        error: 'Nenhum vínculo encontrado entre CSV e as Fotos!',
+      }
     }
 
-    const outDir = path.join(path.dirname(csvPath), "OUTPUT_ARTHNEX_MATCH")
+    const outDir = path.join(path.dirname(csvPath), 'OUTPUT_ARTHNEX_MATCH')
     fs.mkdirSync(outDir, { recursive: true })
 
-    sendLog(`Copiando e renomeando ${matches.length} arquivos vinculados...`, "info")
+    sendLog(
+      `Copiando e renomeando ${matches.length} arquivos vinculados...`,
+      'info'
+    )
 
     matches.forEach((m, idx) => {
       if (idx % 10 === 0) {
-        if (webContents) webContents.send('arthprogress', { current: idx, total: matches.length })
+        if (webContents)
+          webContents.send('arthprogress', {
+            current: idx,
+            total: matches.length,
+          })
       }
 
       const foto = m.foto
@@ -4305,17 +5412,30 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
       }
     })
 
-    if (webContents) webContents.send('arthprogress', { current: matches.length, total: matches.length })
+    if (webContents)
+      webContents.send('arthprogress', {
+        current: matches.length,
+        total: matches.length,
+      })
 
-    sendLog("\n--- RELATÓRIO DO VÍNCULO ---", "info")
-    sendLog(`✓ Matches OK: ${matches.length}`, "success")
+    sendLog('\n--- RELATÓRIO DO VÍNCULO ---', 'info')
+    sendLog(`✓ Matches OK: ${matches.length}`, 'success')
 
     if (colisoesResolvidas > 0) {
-      sendLog(`⚠ Colisões resolvidas por ordem: ${colisoesResolvidas}`, "warning")
+      sendLog(
+        `⚠ Colisões resolvidas por ordem: ${colisoesResolvidas}`,
+        'warning'
+      )
     }
     if (orfaoCsv > 0) {
-      sendLog(`⚠ CSV Órfão: ${orfaoCsv} linhas sem foto Arthnex correspondente`, "warning")
-      const reportPath = path.join(path.dirname(csvPath), "relatorio_linhas_orfas.csv")
+      sendLog(
+        `⚠ CSV Órfão: ${orfaoCsv} linhas sem foto Arthnex correspondente`,
+        'warning'
+      )
+      const reportPath = path.join(
+        path.dirname(csvPath),
+        'relatorio_linhas_orfas.csv'
+      )
       try {
         if (linhasOrfasCsv.length > 0) {
           const cabecalhos = Object.keys(linhasOrfasCsv[0].row_data)
@@ -4324,32 +5444,50 @@ export async function vincularArthnexCsv(csvPath: string, fotosDir: string, webC
             csvLines.push(cabecalhos.map(h => l.row_data[h]).join(';'))
           })
           fs.writeFileSync(reportPath, '\uFEFF' + csvLines.join('\n'), 'utf-8')
-          sendLog(`  → Foi gerado um relatório detalhado das faltas em: ${path.basename(reportPath)}`, "warning")
+          sendLog(
+            `  → Foi gerado um relatório detalhado das faltas em: ${path.basename(reportPath)}`,
+            'warning'
+          )
         }
       } catch (err: any) {
-        sendLog(`Erro ao salvar relatório de órfãos: ${err.message}`, "warning")
+        sendLog(`Erro ao salvar relatório de órfãos: ${err.message}`, 'warning')
       }
     }
 
     if (orfaoFoto > 0) {
-      sendLog(`⚠ Foto Órfã: ${orfaoFoto} fotos Arthnex sem linha no CSV correspondente`, "warning")
+      sendLog(
+        `⚠ Foto Órfã: ${orfaoFoto} fotos Arthnex sem linha no CSV correspondente`,
+        'warning'
+      )
     }
 
-    const bladesDesaparecidos = Array.from(bladeSnsCsv).filter(x => !bladeSnsFotos.has(x))
+    const bladesDesaparecidos = Array.from(bladeSnsCsv).filter(
+      x => !bladeSnsFotos.has(x)
+    )
     if (bladesDesaparecidos.length > 0) {
-      sendLog(`✗ Blade SNs faltantes nas fotos: ${bladesDesaparecidos.join(', ')}`, "error")
+      sendLog(
+        `✗ Blade SNs faltantes nas fotos: ${bladesDesaparecidos.join(', ')}`,
+        'error'
+      )
     }
 
-    sendLog(`\nProcesso concluído! Arquivos renomeados em: ${outDir}`, "success")
+    sendLog(
+      `\nProcesso concluído! Arquivos renomeados em: ${outDir}`,
+      'success'
+    )
 
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro no vínculo Arthnex-CSV: ${err.message}`, "error")
+    sendLog(`Erro no vínculo Arthnex-CSV: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function analisarBladeSplit(filePath: string, threshold: number, webContents?: any): Promise<any[]> {
+export async function analisarBladeSplit(
+  filePath: string,
+  threshold: number,
+  webContents?: any
+): Promise<any[]> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
@@ -4357,11 +5495,11 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
   try {
     const ext = path.extname(filePath).toLowerCase()
     if (ext === '.json') {
-      sendLog("Analisando JSON para divisão de voo...", "info")
+      sendLog('Analisando JSON para divisão de voo...', 'info')
       const data = cryptoService.loadJson(filePath, [], true)
       const windblades = data.windblades || []
       if (windblades.length === 0) {
-        sendLog("Nenhum windblade encontrado no JSON.", "error")
+        sendLog('Nenhum windblade encontrado no JSON.', 'error')
         return []
       }
 
@@ -4375,16 +5513,21 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
       const suspeitos: any[] = []
       for (const [pos, itens] of Object.entries(grupos)) {
         if (itens.length > threshold) {
-          sendLog(`Posição ${pos} tem ${itens.length} fotos (suspeito > ${threshold}). Calculando gaps...`, "warning")
-          
-          const itensComTempo = itens.map(it => {
-            const name = it.item.image_metadata?.original_file_name || ''
-            const dt = extractDjiTimestamp(name)
-            return {
-              original_idx: it.original_idx,
-              dt
-            }
-          }).sort((a, b) => a.dt.getTime() - b.dt.getTime())
+          sendLog(
+            `Posição ${pos} tem ${itens.length} fotos (suspeito > ${threshold}). Calculando gaps...`,
+            'warning'
+          )
+
+          const itensComTempo = itens
+            .map(it => {
+              const name = it.item.image_metadata?.original_file_name || ''
+              const dt = extractDjiTimestamp(name)
+              return {
+                original_idx: it.original_idx,
+                dt,
+              }
+            })
+            .sort((a, b) => a.dt.getTime() - b.dt.getTime())
 
           const quebras: any[] = []
           for (let i = 1; i < itensComTempo.length; i++) {
@@ -4399,15 +5542,31 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
 
           if (quebras.length === 0) continue
 
-          sendLog(`-> ${quebras.length} gap(s) encontrado(s) em '${pos}': ` + quebras.map(q => `${q.gap_seconds.toFixed(0)}s`).join(', '), "warning")
+          sendLog(
+            `-> ${quebras.length} gap(s) encontrado(s) em '${pos}': ` +
+              quebras.map(q => `${q.gap_seconds.toFixed(0)}s`).join(', '),
+            'warning'
+          )
 
-          const limites = [0, ...quebras.map(q => q.index), itensComTempo.length]
+          const limites = [
+            0,
+            ...quebras.map(q => q.index),
+            itensComTempo.length,
+          ]
           const sessoes: any[] = []
           for (let sIdx = 0; sIdx < limites.length - 1; sIdx++) {
             const fatia = itensComTempo.slice(limites[sIdx], limites[sIdx + 1])
-            const dtsValidos = fatia.map(x => x.dt).filter(d => d.getTime() !== 0)
-            const tsInicio = dtsValidos.length > 0 ? new Date(Math.min(...dtsValidos.map(d => d.getTime()))) : null
-            const tsFim = dtsValidos.length > 0 ? new Date(Math.max(...dtsValidos.map(d => d.getTime()))) : null
+            const dtsValidos = fatia
+              .map(x => x.dt)
+              .filter(d => d.getTime() !== 0)
+            const tsInicio =
+              dtsValidos.length > 0
+                ? new Date(Math.min(...dtsValidos.map(d => d.getTime())))
+                : null
+            const tsFim =
+              dtsValidos.length > 0
+                ? new Date(Math.max(...dtsValidos.map(d => d.getTime())))
+                : null
 
             sessoes.push({
               session_idx: sIdx,
@@ -4415,44 +5574,61 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
               ts_fim: tsFim ? tsFim.toISOString() : null,
               total_fotos: fatia.length,
               original_indices: fatia.map(x => x.original_idx),
-              itens_com_tempo: fatia
+              itens_com_tempo: fatia,
             })
           }
 
           suspeitos.push({
             blade_position: pos,
             total_fotos: itens.length,
-            sessoes
+            sessoes,
           })
         }
       }
 
       if (suspeitos.length === 0) {
-        sendLog("Nenhuma posição parece misturada ou os gaps temporais são normais.", "success")
+        sendLog(
+          'Nenhuma posição parece misturada ou os gaps temporais são normais.',
+          'success'
+        )
       }
       return suspeitos
     } else if (ext === '.csv') {
-      sendLog("Analisando CSV para divisão de voo...", "info")
+      sendLog('Analisando CSV para divisão de voo...', 'info')
       const csvContent = fs.readFileSync(filePath, 'utf-8')
       let delimiter = ';'
       if (!csvContent.includes(';')) delimiter = ','
 
-      const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
+      const lines = csvContent
+        .split(/\r?\n/)
+        .map(l => parseCsvLine(l, delimiter))
       const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
-      const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
-        const obj: any = {}
-        headers.forEach((h, idx) => {
-          obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+      const rows = lines
+        .slice(1)
+        .filter(l => l.length >= headers.length)
+        .map(l => {
+          const obj: any = {}
+          headers.forEach((h, idx) => {
+            obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+          })
+          return obj
         })
-        return obj
-      })
 
-      if (!headers.includes('Blade SN') || !headers.includes('Original Image')) {
-        sendLog("CSV inválido. Colunas 'Blade SN' e 'Original Image' necessárias.", "error")
+      if (
+        !headers.includes('Blade SN') ||
+        !headers.includes('Original Image')
+      ) {
+        sendLog(
+          "CSV inválido. Colunas 'Blade SN' e 'Original Image' necessárias.",
+          'error'
+        )
         return []
       }
 
-      const sideCol = ['Side', 'side', 'Blade Side', 'blade_side', 'Image Side'].find(c => headers.includes(c)) || ''
+      const sideCol =
+        ['Side', 'side', 'Blade Side', 'blade_side', 'Image Side'].find(c =>
+          headers.includes(c)
+        ) || ''
 
       const grupos: Record<string, any[]> = {}
       rows.forEach((row, idx) => {
@@ -4467,16 +5643,18 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
       for (const [sn, itens] of Object.entries(grupos)) {
         if (itens.length < threshold) continue
 
-        const itensComTempo = itens.map(it => {
-          const name = String(it.row['Original Image']).trim()
-          const dt = extractDjiTimestamp(name)
-          const sideVal = sideCol ? String(it.row[sideCol]).trim() : ''
-          return {
-            original_idx: it.original_idx,
-            dt,
-            side: ['nan', 'NaN', 'None'].includes(sideVal) ? '' : sideVal
-          }
-        }).sort((a, b) => a.dt.getTime() - b.dt.getTime())
+        const itensComTempo = itens
+          .map(it => {
+            const name = String(it.row['Original Image']).trim()
+            const dt = extractDjiTimestamp(name)
+            const sideVal = sideCol ? String(it.row[sideCol]).trim() : ''
+            return {
+              original_idx: it.original_idx,
+              dt,
+              side: ['nan', 'NaN', 'None'].includes(sideVal) ? '' : sideVal,
+            }
+          })
+          .sort((a, b) => a.dt.getTime() - b.dt.getTime())
 
         const quebras: number[] = []
         for (let i = 1; i < itensComTempo.length; i++) {
@@ -4491,16 +5669,27 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
 
         if (quebras.length === 0) continue
 
-        sendLog(`Pá ${sn}: ${itensComTempo.length} fotos | ${quebras.length + 1} sessões detectadas`, "warning")
+        sendLog(
+          `Pá ${sn}: ${itensComTempo.length} fotos | ${quebras.length + 1} sessões detectadas`,
+          'warning'
+        )
 
         const limites = [0, ...quebras, itensComTempo.length]
         const sessoes: any[] = []
         for (let sIdx = 0; sIdx < limites.length - 1; sIdx++) {
           const fatia = itensComTempo.slice(limites[sIdx], limites[sIdx + 1])
           const dtsValidos = fatia.map(x => x.dt).filter(d => d.getTime() !== 0)
-          const tsInicio = dtsValidos.length > 0 ? new Date(Math.min(...dtsValidos.map(d => d.getTime()))) : null
-          const tsFim = dtsValidos.length > 0 ? new Date(Math.max(...dtsValidos.map(d => d.getTime()))) : null
-          const sides = Array.from(new Set(fatia.map(x => x.side).filter(s => !!s))).sort()
+          const tsInicio =
+            dtsValidos.length > 0
+              ? new Date(Math.min(...dtsValidos.map(d => d.getTime())))
+              : null
+          const tsFim =
+            dtsValidos.length > 0
+              ? new Date(Math.max(...dtsValidos.map(d => d.getTime())))
+              : null
+          const sides = Array.from(
+            new Set(fatia.map(x => x.side).filter(s => !!s))
+          ).sort()
 
           sessoes.push({
             session_idx: sIdx,
@@ -4509,29 +5698,36 @@ export async function analisarBladeSplit(filePath: string, threshold: number, we
             total_fotos: fatia.length,
             sides,
             original_indices: fatia.map(x => x.original_idx),
-            itens_com_tempo: fatia
+            itens_com_tempo: fatia,
           })
         }
 
         suspeitos.push({
           blade_sn: sn,
           total_fotos: itensComTempo.length,
-          sessoes
+          sessoes,
         })
       }
 
       if (suspeitos.length === 0) {
-        sendLog("Nenhuma pá com múltiplas sessões de voo detectadas.", "success")
+        sendLog(
+          'Nenhuma pá com múltiplas sessões de voo detectadas.',
+          'success'
+        )
       }
       return suspeitos
     }
   } catch (err: any) {
-    sendLog(`Erro na análise de split: ${err.message}`, "error")
+    sendLog(`Erro na análise de split: ${err.message}`, 'error')
   }
   return []
 }
 
-export async function corrigirBladeSplit(filePath: string, correcoes: any[], webContents?: any): Promise<any> {
+export async function corrigirBladeSplit(
+  filePath: string,
+  correcoes: any[],
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
@@ -4568,8 +5764,14 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
               const strFind = escapeRegExp(`${posOriginal}_${bladeSnAntigo}`)
               const strRepl = `${novaPos}_${novoSn}`
               let newPath = oldPath.replace(new RegExp(strFind, 'g'), strRepl)
-              newPath = newPath.replace(new RegExp(`/${escapeRegExp(posOriginal)}/`, 'g'), `/${novaPos}/`)
-              newPath = newPath.replace(new RegExp(`-${escapeRegExp(posOriginal)}-`, 'g'), `-${novaPos}-`)
+              newPath = newPath.replace(
+                new RegExp(`/${escapeRegExp(posOriginal)}/`, 'g'),
+                `/${novaPos}/`
+              )
+              newPath = newPath.replace(
+                new RegExp(`-${escapeRegExp(posOriginal)}-`, 'g'),
+                `-${novaPos}-`
+              )
               meta.image_file_path = newPath
             }
             mudancas++
@@ -4580,25 +5782,30 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
       if (mudancas > 0) {
         const outPath = filePath.replace(/\.json$/i, '_corrigido.json')
         fs.writeFileSync(outPath, JSON.stringify(data, null, 2), 'utf-8')
-        sendLog(`Correção aplicada! ${mudancas} fotos atualizadas.`, "success")
-        sendLog(`Salvo como: ${path.basename(outPath)}`, "success")
+        sendLog(`Correção aplicada! ${mudancas} fotos atualizadas.`, 'success')
+        sendLog(`Salvo como: ${path.basename(outPath)}`, 'success')
       } else {
-        sendLog("Nenhuma mudança foi aplicada.", "info")
+        sendLog('Nenhuma mudança foi aplicada.', 'info')
       }
     } else if (ext === '.csv') {
       const csvContent = fs.readFileSync(filePath, 'utf-8')
       let delimiter = ';'
       if (!csvContent.includes(';')) delimiter = ','
 
-      const lines = csvContent.split(/\r?\n/).map(l => parseCsvLine(l, delimiter))
+      const lines = csvContent
+        .split(/\r?\n/)
+        .map(l => parseCsvLine(l, delimiter))
       const headers = lines[0].map(h => h.trim().replace(/^"|"$/g, ''))
-      const rows = lines.slice(1).filter(l => l.length >= headers.length).map(l => {
-        const obj: any = {}
-        headers.forEach((h, idx) => {
-          obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+      const rows = lines
+        .slice(1)
+        .filter(l => l.length >= headers.length)
+        .map(l => {
+          const obj: any = {}
+          headers.forEach((h, idx) => {
+            obj[h] = l[idx]?.trim().replace(/^"|"$/g, '')
+          })
+          return obj
         })
-        return obj
-      })
 
       const multiplosOriginais = correcoes.length > 1
       let mudancas = 0
@@ -4606,7 +5813,7 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
       for (const atrib of correcoes) {
         const snOriginal = atrib.blade_sn_original
         const porNovoSn: Record<string, number[]> = {}
-        
+
         atrib.sessoes.forEach((sessao: any) => {
           const novoSn = sessao.novo_sn
           if (!porNovoSn[novoSn]) porNovoSn[novoSn] = []
@@ -4633,26 +5840,36 @@ export async function corrigirBladeSplit(filePath: string, correcoes: any[], web
 
           const outLines = [headers.map(h => `"${h}"`).join(';')]
           dfGrupo.forEach(r => {
-            outLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(';'))
+            outLines.push(
+              headers
+                .map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`)
+                .join(';')
+            )
           })
           fs.writeFileSync(outPath, outLines.join('\n'), 'utf-8')
-          sendLog(`✔ CSV gerado para SN ${novoSn}: ${path.basename(outPath)} (${dfGrupo.length} fotos)`, "success")
+          sendLog(
+            `✔ CSV gerado para SN ${novoSn}: ${path.basename(outPath)} (${dfGrupo.length} fotos)`,
+            'success'
+          )
           mudancas++
         }
       }
 
       if (mudancas === 0) {
-        sendLog("Nenhuma mudança foi aplicada.", "info")
+        sendLog('Nenhuma mudança foi aplicada.', 'info')
       }
     }
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao aplicar correção de split: ${err.message}`, "error")
+    sendLog(`Erro ao aplicar correção de split: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function jsonParaCsvOrganizar(jsonPath: string, webContents?: any): Promise<any> {
+export async function jsonParaCsvOrganizar(
+  jsonPath: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
@@ -4661,8 +5878,8 @@ export async function jsonParaCsvOrganizar(jsonPath: string, webContents?: any):
     const data = cryptoService.loadJson(jsonPath, [], true)
     const windblades = data.windblades || []
     if (windblades.length === 0) {
-      sendLog("Nenhum windblade encontrado no JSON.", "error")
-      return { success: false, error: "Nenhum windblade encontrado." }
+      sendLog('Nenhum windblade encontrado no JSON.', 'error')
+      return { success: false, error: 'Nenhum windblade encontrado.' }
     }
 
     const groups: Record<string, any[]> = {}
@@ -4687,22 +5904,31 @@ export async function jsonParaCsvOrganizar(jsonPath: string, webContents?: any):
       for (const [region, regionItems] of Object.entries(byRegion)) {
         const isTipToRoot = region === 'SS' || region === 'PS'
         regionItems.sort((a, b) => {
-          const tA = extractDjiTimestamp(a.image_metadata?.original_file_name || '').getTime()
-          const tB = extractDjiTimestamp(b.image_metadata?.original_file_name || '').getTime()
+          const tA = extractDjiTimestamp(
+            a.image_metadata?.original_file_name || ''
+          ).getTime()
+          const tB = extractDjiTimestamp(
+            b.image_metadata?.original_file_name || ''
+          ).getTime()
           return tA - tB
         })
         if (isTipToRoot) {
           regionItems.reverse()
         }
 
-        const rawPx = regionItems.map(item => item.image_metadata?.pixel_size || '')
+        const rawPx = regionItems.map(
+          item => item.image_metadata?.pixel_size || ''
+        )
         const fixedPx = _fixPixelMm(rawPx)
         let pxCorrections = 0
         rawPx.forEach((o, idx) => {
           if (String(o) !== String(fixedPx[idx])) pxCorrections++
         })
         if (pxCorrections > 0) {
-          sendLog(`⚠ ${pxCorrections} Pixel MM corrompido(s) corrigidos na região ${region} (${bladeSn}).`, "warning")
+          sendLog(
+            `⚠ ${pxCorrections} Pixel MM corrompido(s) corrigidos na região ${region} (${bladeSn}).`,
+            'warning'
+          )
         }
 
         regionItems.forEach((item, idxR) => {
@@ -4711,55 +5937,77 @@ export async function jsonParaCsvOrganizar(jsonPath: string, webContents?: any):
           if (!originalName) return
           rows.push({
             'Blade SN': bladeSn,
-            'Side': region,
+            Side: region,
             'Original Image': originalName,
-            'Location': meta.location || '',
-            'Pixel MM': fixedPx[idxR]
+            Location: meta.location || '',
+            'Pixel MM': fixedPx[idxR],
           })
         })
       }
 
       if (rows.length === 0) {
-        sendLog(`⚠ Blade SN ${bladeSn}: nenhuma imagem encontrada, pulando.`, "warning")
+        sendLog(
+          `⚠ Blade SN ${bladeSn}: nenhuma imagem encontrada, pulando.`,
+          'warning'
+        )
         continue
       }
 
       const safeSn = bladeSn.replace(/[\/*?:"<>|]/g, '').trim()
       const outPath = jsonPath.replace(/\.json$/i, `_${safeSn}_organizar.csv`)
-      const headers = ['Blade SN', 'Side', 'Original Image', 'Location', 'Pixel MM']
+      const headers = [
+        'Blade SN',
+        'Side',
+        'Original Image',
+        'Location',
+        'Pixel MM',
+      ]
       const csvLines = [headers.join(';')]
       rows.forEach(r => {
-        csvLines.push(`${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`)
+        csvLines.push(
+          `${r['Blade SN']};${r['Side']};${r['Original Image']};${r['Location']};${r['Pixel MM']}`
+        )
       })
       fs.writeFileSync(outPath, '\uFEFF' + csvLines.join('\n'), 'utf-8')
-      sendLog(`✔ ${bladeSn}: ${path.basename(outPath)} (${rows.length} linhas)`, "success")
+      sendLog(
+        `✔ ${bladeSn}: ${path.basename(outPath)} (${rows.length} linhas)`,
+        'success'
+      )
       csvsGerados++
     }
 
     if (csvsGerados === 0) {
-      sendLog("Nenhum CSV gerado — JSON sem imagens válidas.", "error")
-      return { success: false, error: "Nenhum CSV gerado." }
+      sendLog('Nenhum CSV gerado — JSON sem imagens válidas.', 'error')
+      return { success: false, error: 'Nenhum CSV gerado.' }
     }
 
-    sendLog(`${csvsGerados} CSV(s) gerado(s) prontos para o Módulo 1.`, "success")
-    sendLog(`Output: ${path.dirname(jsonPath)}`, "info")
+    sendLog(
+      `${csvsGerados} CSV(s) gerado(s) prontos para o Módulo 1.`,
+      'success'
+    )
+    sendLog(`Output: ${path.dirname(jsonPath)}`, 'info')
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro ao gerar CSV do JSON: ${err.message}`, "error")
+    sendLog(`Erro ao gerar CSV do JSON: ${err.message}`, 'error')
     return { success: false, error: err.message }
   }
 }
 
-export async function carregarFotosGps(pasta: string, webContents?: any): Promise<any[]> {
+export async function carregarFotosGps(
+  pasta: string,
+  webContents?: any
+): Promise<any[]> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
 
   try {
-    const filePaths = _listImagesFlat(pasta).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))
+    const filePaths = _listImagesFlat(pasta).sort((a, b) =>
+      path.basename(a).localeCompare(path.basename(b))
+    )
 
     if (filePaths.length === 0) {
-      sendLog("Nenhuma foto .JPG/.JPEG encontrada na pasta.", "error")
+      sendLog('Nenhuma foto .JPG/.JPEG encontrada na pasta.', 'error')
       return []
     }
 
@@ -4769,21 +6017,27 @@ export async function carregarFotosGps(pasta: string, webContents?: any): Promis
     for (const f of filePaths) {
       const alt = await extractGpsAltitude(f)
       if (alt !== null) {
-        resultado.push({ nome: path.basename(f), altitude: parseFloat(alt.toFixed(3)) })
+        resultado.push({
+          nome: path.basename(f),
+          altitude: parseFloat(alt.toFixed(3)),
+        })
       } else {
         semGps++
       }
     }
 
-    sendLog(`${resultado.length} fotos com GPS | ${semGps} sem GPS.`, "info")
+    sendLog(`${resultado.length} fotos com GPS | ${semGps} sem GPS.`, 'info')
     return resultado
   } catch (err: any) {
-    sendLog(`Erro ao carregar fotos GPS: ${err.message}`, "error")
+    sendLog(`Erro ao carregar fotos GPS: ${err.message}`, 'error')
     return []
   }
 }
 
-export async function lerJsonReferenciaPixelMm(jsonPath: string, webContents?: any): Promise<any> {
+export async function lerJsonReferenciaPixelMm(
+  jsonPath: string,
+  webContents?: any
+): Promise<any> {
   const sendLog = (text: string, type = 'info') => {
     if (webContents) webContents.send('arthlog', { type, text })
   }
@@ -4791,11 +6045,13 @@ export async function lerJsonReferenciaPixelMm(jsonPath: string, webContents?: a
     const data = cryptoService.loadJson(jsonPath, [], true)
     const windblades = data.windblades || []
     if (windblades.length === 0) {
-      return { success: false, error: "Nenhum windblade encontrado no JSON." }
+      return { success: false, error: 'Nenhum windblade encontrado no JSON.' }
     }
     const byRegion: Record<string, number[]> = {}
     windblades.forEach((item: any) => {
-      const region = String(item.region || '').trim().toUpperCase()
+      const region = String(item.region || '')
+        .trim()
+        .toUpperCase()
       if (['LE', 'SS', 'TE', 'PS'].includes(region)) {
         const px = parseFloat(item.image_metadata?.pixel_size)
         if (!isNaN(px) && px >= 0.1 && px <= 1.0) {
@@ -4810,16 +6066,24 @@ export async function lerJsonReferenciaPixelMm(jsonPath: string, webContents?: a
     Object.keys(byRegion).forEach(region => {
       const vals = byRegion[region]
       if (vals.length > 0) {
-        averages[region] = parseFloat((vals.reduce((sum, v) => sum + v, 0) / vals.length).toFixed(5))
+        averages[region] = parseFloat(
+          (vals.reduce((sum, v) => sum + v, 0) / vals.length).toFixed(5)
+        )
         foundAny = true
       }
     })
 
     if (!foundAny) {
-      return { success: false, error: "Nenhum valor de pixel_size válido encontrado no JSON." }
+      return {
+        success: false,
+        error: 'Nenhum valor de pixel_size válido encontrado no JSON.',
+      }
     }
 
-    sendLog(`✔ Médias de pixel_mm carregadas do JSON: ${JSON.stringify(averages)}`, "success")
+    sendLog(
+      `✔ Médias de pixel_mm carregadas do JSON: ${JSON.stringify(averages)}`,
+      'success'
+    )
     return { success: true, averages }
   } catch (err: any) {
     return { success: false, error: err.message }

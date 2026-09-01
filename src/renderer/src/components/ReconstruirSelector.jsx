@@ -1,32 +1,40 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react'
 
-const SIDES = ['SS', 'PS', 'LE', 'TE'];
+const SIDES = ['SS', 'PS', 'LE', 'TE']
 
-const emptySide = () => ({ side: 'SS', start: '', end: '', pixel_mm_avg: '0.45' });
+const emptySide = () => ({
+  side: 'SS',
+  start: '',
+  end: '',
+  pixel_mm_avg: '0.45',
+})
 
 export default function ReconstruirSelector({ D, fotos, setOptions }) {
-  const [bladeSn, setBladeSn]   = useState('');
-  const [sides, setSides]       = useState([emptySide()]);
+  const [bladeSn, setBladeSn] = useState('')
+  const [sides, setSides] = useState([emptySide()])
 
   // Propaga config ao parent sempre que algo muda
   useEffect(() => {
     setOptions(o => ({
       ...o,
       blade_sn: bladeSn,
-      sides: sides.map(s => ({ ...s, pixel_mm_avg: parseFloat(s.pixel_mm_avg) || 0.45 })),
-    }));
-  }, [bladeSn, sides]); // eslint-disable-line react-hooks/exhaustive-deps
+      sides: sides.map(s => ({
+        ...s,
+        pixel_mm_avg: parseFloat(s.pixel_mm_avg) || 0.45,
+      })),
+    }))
+  }, [bladeSn, sides]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateSide = (idx, field, value) => {
     setSides(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
-      return next;
-    });
-  };
+      const next = [...prev]
+      next[idx] = { ...next[idx], [field]: value }
+      return next
+    })
+  }
 
-  const addSide    = () => setSides(prev => [...prev, emptySide()]);
-  const removeSide = (idx) => setSides(prev => prev.filter((_, i) => i !== idx));
+  const addSide = () => setSides(prev => [...prev, emptySide()])
+  const removeSide = idx => setSides(prev => prev.filter((_, i) => i !== idx))
 
   const inputStyle = {
     background: D.inputBg,
@@ -36,21 +44,23 @@ export default function ReconstruirSelector({ D, fotos, setOptions }) {
     borderRadius: '4px',
     fontSize: '12px',
     outline: 'none',
-  };
+  }
 
-  const selectStyle = { ...inputStyle, cursor: 'pointer' };
+  const selectStyle = { ...inputStyle, cursor: 'pointer' }
 
   return (
-    <div style={{
-      background: D.logBg,
-      border: `1px solid ${D.borderLight}`,
-      borderRadius: '6px',
-      padding: '12px',
-      marginTop: '8px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '10px',
-    }}>
+    <div
+      style={{
+        background: D.logBg,
+        border: `1px solid ${D.borderLight}`,
+        borderRadius: '6px',
+        padding: '12px',
+        marginTop: '8px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      }}
+    >
       {/* Blade SN */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <span style={{ color: D.textMuted, fontSize: '11px' }}>Blade SN</span>
@@ -64,24 +74,47 @@ export default function ReconstruirSelector({ D, fotos, setOptions }) {
       </div>
 
       {/* Cabeçalho da tabela de lados */}
-      <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 90px 28px', gap: '6px', alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '70px 1fr 1fr 90px 28px',
+          gap: '6px',
+          alignItems: 'center',
+        }}
+      >
         <span style={{ color: D.textMuted, fontSize: '11px' }}>Lado</span>
-        <span style={{ color: D.textMuted, fontSize: '11px' }}>Foto início</span>
+        <span style={{ color: D.textMuted, fontSize: '11px' }}>
+          Foto início
+        </span>
         <span style={{ color: D.textMuted, fontSize: '11px' }}>Foto fim</span>
-        <span style={{ color: D.textMuted, fontSize: '11px' }}>Pixel MM médio</span>
+        <span style={{ color: D.textMuted, fontSize: '11px' }}>
+          Pixel MM médio
+        </span>
         <span />
       </div>
 
       {/* Linhas de lados */}
       {sides.map((s, idx) => (
-        <div key={idx} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 90px 28px', gap: '6px', alignItems: 'center' }}>
+        <div
+          key={idx}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '70px 1fr 1fr 90px 28px',
+            gap: '6px',
+            alignItems: 'center',
+          }}
+        >
           {/* Side name */}
           <select
             value={s.side}
             onChange={e => updateSide(idx, 'side', e.target.value)}
             style={selectStyle}
           >
-            {SIDES.map(name => <option key={name} value={name}>{name}</option>)}
+            {SIDES.map(name => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
           </select>
 
           {/* Start photo */}
@@ -92,7 +125,9 @@ export default function ReconstruirSelector({ D, fotos, setOptions }) {
           >
             <option value="">— início —</option>
             {fotos.map(f => (
-              <option key={f.nome} value={f.nome}>{f.nome} ({f.z_relativo_mm} mm)</option>
+              <option key={f.nome} value={f.nome}>
+                {f.nome} ({f.z_relativo_mm} mm)
+              </option>
             ))}
           </select>
 
@@ -104,7 +139,9 @@ export default function ReconstruirSelector({ D, fotos, setOptions }) {
           >
             <option value="">— fim —</option>
             {fotos.map(f => (
-              <option key={f.nome} value={f.nome}>{f.nome} ({f.z_relativo_mm} mm)</option>
+              <option key={f.nome} value={f.nome}>
+                {f.nome} ({f.z_relativo_mm} mm)
+              </option>
             ))}
           </select>
 
@@ -120,8 +157,15 @@ export default function ReconstruirSelector({ D, fotos, setOptions }) {
           />
 
           {/* Indicador tip→root */}
-          {['SS','PS'].includes(s.side) && (
-            <span style={{ gridColumn: '1 / -1', color: D.warning, fontSize: '11px', marginTop: '-4px' }}>
+          {['SS', 'PS'].includes(s.side) && (
+            <span
+              style={{
+                gridColumn: '1 / -1',
+                color: D.warning,
+                fontSize: '11px',
+                marginTop: '-4px',
+              }}
+            >
               ↩ Ordem invertida automaticamente (tip→root)
             </span>
           )}
@@ -162,5 +206,5 @@ export default function ReconstruirSelector({ D, fotos, setOptions }) {
         + Adicionar lado
       </button>
     </div>
-  );
+  )
 }

@@ -2,26 +2,29 @@ import fs from 'fs'
 import path from 'path'
 
 export const PACKER_REGION_MAP: Record<string, string> = {
-  "LE":     "LE",
-  "TE":     "TE",
-  "CE":     "CE",
-  "BOX":    "TE",
-  "VISUAL": "CE",
+  LE: 'LE',
+  TE: 'TE',
+  CE: 'CE',
+  BOX: 'TE',
+  VISUAL: 'CE',
   // Suporte para pastas do Arthfilm 360
-  "CE_3H":  "CE",
-  "CE_9H":  "CE",
-  "LE_3H":  "LE",
-  "LE_9H":  "LE",
-  "CE_03":  "CE",
-  "CE_09":  "CE",
-  "LE_03":  "LE",
-  "LE_09":  "LE"
+  CE_3H: 'CE',
+  CE_9H: 'CE',
+  LE_3H: 'LE',
+  LE_9H: 'LE',
+  CE_03: 'CE',
+  CE_09: 'CE',
+  LE_03: 'LE',
+  LE_09: 'LE',
 }
 
-const PACKER_REGION_ORDER = ["CE", "VISUAL", "TE", "BOX", "LE"]
-const PACKER_EXTS = new Set([".JPG", ".JPEG", ".HEIC"])
+const PACKER_REGION_ORDER = ['CE', 'VISUAL', 'TE', 'BOX', 'LE']
+const PACKER_EXTS = new Set(['.JPG', '.JPEG', '.HEIC'])
 
-export function packerDetectInfo(filePath: string, basePath: string): { region: string; location: number | null } | null {
+export function packerDetectInfo(
+  filePath: string,
+  basePath: string
+): { region: string; location: number | null } | null {
   const ext = path.extname(filePath).toUpperCase()
   if (!PACKER_EXTS.has(ext)) return null
 
@@ -77,7 +80,7 @@ export function packerDetectInfo(filePath: string, basePath: string): { region: 
 export function packerIsMultiBlade(dirPath: string): boolean {
   if (!fs.existsSync(dirPath)) return false
   const children = fs.readdirSync(dirPath, { withFileTypes: true })
-  
+
   for (const child of children) {
     if (child.isDirectory()) {
       if (PACKER_REGION_MAP[child.name.toUpperCase()]) {
@@ -89,17 +92,22 @@ export function packerIsMultiBlade(dirPath: string): boolean {
   let bladeCandidates = 0
   for (const child of children) {
     if (!child.isDirectory() || child.name.startsWith('.')) continue
-    
+
     const subpath = path.join(dirPath, child.name)
     const subChildren = fs.readdirSync(subpath, { withFileTypes: true })
-    
+
     for (const item of subChildren) {
       if (item.isDirectory() && PACKER_REGION_MAP[item.name.toUpperCase()]) {
         bladeCandidates++
         break
       }
-      if (item.isFile() && PACKER_EXTS.has(path.extname(item.name).toUpperCase())) {
-        const stem = path.basename(item.name, path.extname(item.name)).toUpperCase()
+      if (
+        item.isFile() &&
+        PACKER_EXTS.has(path.extname(item.name).toUpperCase())
+      ) {
+        const stem = path
+          .basename(item.name, path.extname(item.name))
+          .toUpperCase()
         if (stem.match(/^(.+?)--(.+?)--/)) {
           bladeCandidates++
           break
@@ -132,12 +140,18 @@ function rglobFiles(dir: string): string[] {
 export function packerCollectBlade(
   bladePath: string,
   basePath: string
-): { turbine: string; blade: string; files: any[]; skipped: number; withoutLocation: number } {
+): {
+  turbine: string
+  blade: string
+  files: any[]
+  skipped: number
+  withoutLocation: number
+} {
   const files: any[] = []
   let skipped = 0
   let withoutLocation = 0
-  let turbine = ""
-  let blade = ""
+  let turbine = ''
+  let blade = ''
 
   const allFiles = rglobFiles(bladePath)
   for (const f of allFiles) {
@@ -150,7 +164,7 @@ export function packerCollectBlade(
       if (location === null) {
         withoutLocation++
       }
-      
+
       if (!turbine) {
         const stem = path.basename(f, path.extname(f))
         const headerMatch = stem.match(/^(.+?)--(.+?)--/i)
@@ -204,13 +218,15 @@ export function packerGenerateCsv(
   })
 
   const rows: string[] = []
-  rows.push("id,workorder,turbine,blade,region,image_id,distance_to_hub,gimbal_pos,temperature,timestamp")
+  rows.push(
+    'id,workorder,turbine,blade,region,image_id,distance_to_hub,gimbal_pos,temperature,timestamp'
+  )
 
   files.forEach((file, index) => {
     const csvRegion = PACKER_REGION_MAP[file.region] || file.region
     const relPath = path.relative(basePath, file.filePath)
     const imageId = relPath.replace(/\//g, '\\')
-    const distanceToHub = file.location !== null ? String(file.location) : "0"
+    const distanceToHub = file.location !== null ? String(file.location) : '0'
 
     const row = `${index + 1},,${turbine},${blade},${csvRegion},${imageId},${distanceToHub},00,00,00`
     rows.push(row)
@@ -225,8 +241,8 @@ export function packerGenerateCsv(
   const csvPath = path.join(outputDir, csvName)
 
   fs.writeFileSync(csvPath, rows.join('\n'), 'utf-8')
-  sendLog(`CSV gerado: ${csvName} (${files.length} linhas)`, "success")
-  sendLog(`  Output: ${csvPath}`, "info")
+  sendLog(`CSV gerado: ${csvName} (${files.length} linhas)`, 'success')
+  sendLog(`  Output: ${csvPath}`, 'info')
 }
 
 export async function packerPlataforma(
@@ -256,16 +272,30 @@ export async function packerPlataforma(
         .map(d => path.join(pasta, d.name))
         .sort()
 
-      sendLog(`Aerogerador detectado — ${bladeDirs.length} pasta(s) de pá encontrada(s)`, "info")
+      sendLog(
+        `Aerogerador detectado — ${bladeDirs.length} pasta(s) de pá encontrada(s)`,
+        'info'
+      )
 
       const bladesData: any[] = []
       for (const bladeDir of bladeDirs) {
-        const { turbine, blade, files, skipped, withoutLocation } = packerCollectBlade(bladeDir, bladeDir)
+        const { turbine, blade, files, skipped, withoutLocation } =
+          packerCollectBlade(bladeDir, bladeDir)
         if (files.length === 0) {
-          sendLog(`  ${path.basename(bladeDir)}: nenhuma imagem com região detectada, pulando`, "warning")
+          sendLog(
+            `  ${path.basename(bladeDir)}: nenhuma imagem com região detectada, pulando`,
+            'warning'
+          )
           continue
         }
-        bladesData.push({ bladeDir, turbine, blade, files, skipped, withoutLocation })
+        bladesData.push({
+          bladeDir,
+          turbine,
+          blade,
+          files,
+          skipped,
+          withoutLocation,
+        })
       }
 
       const snCounts: Record<string, number> = {}
@@ -275,15 +305,27 @@ export async function packerPlataforma(
       const hasCollision = Object.values(snCounts).some(c => c >= 2)
 
       if (hasCollision) {
-        sendLog("", "info")
-        sendLog("⚠️  Conflito detectado: múltiplas pastas produzem o mesmo Blade SN.", "warning")
-        sendLog("    Nome dos arquivos provavelmente foi gerado em campo com SN errado.", "warning")
-        sendLog("    Usando nome da pasta como Blade SN (override automático):", "warning")
+        sendLog('', 'info')
+        sendLog(
+          '⚠️  Conflito detectado: múltiplas pastas produzem o mesmo Blade SN.',
+          'warning'
+        )
+        sendLog(
+          '    Nome dos arquivos provavelmente foi gerado em campo com SN errado.',
+          'warning'
+        )
+        sendLog(
+          '    Usando nome da pasta como Blade SN (override automático):',
+          'warning'
+        )
         bladesData.forEach(bd => {
           const folderName = path.basename(bd.bladeDir)
-          sendLog(`      ${folderName}/  →  blade=${folderName} (era ${bd.blade})`, "warning")
+          sendLog(
+            `      ${folderName}/  →  blade=${folderName} (era ${bd.blade})`,
+            'warning'
+          )
         })
-        sendLog("", "info")
+        sendLog('', 'info')
       }
 
       for (const bd of bladesData) {
@@ -292,7 +334,10 @@ export async function packerPlataforma(
           finalBladeSn = path.basename(bd.bladeDir)
         }
 
-        sendLog(`── Pá: ${bd.turbine}--${finalBladeSn} (${bd.files.length} imagens) ──`, "info")
+        sendLog(
+          `── Pá: ${bd.turbine}--${finalBladeSn} (${bd.files.length} imagens) ──`,
+          'info'
+        )
 
         const regionCounts: Record<string, number> = {}
         bd.files.forEach((f: any) => {
@@ -300,45 +345,68 @@ export async function packerPlataforma(
         })
         PACKER_REGION_ORDER.forEach(r => {
           if (regionCounts[r]) {
-            sendLog(`  ${r}: ${regionCounts[r]} imagens`, "info")
+            sendLog(`  ${r}: ${regionCounts[r]} imagens`, 'info')
           }
         })
 
         if (bd.withoutLocation > 0) {
-          sendLog(`  ⚠️ ${bd.withoutLocation} imagem(ns) sem localização (Z) no nome`, "warning")
+          sendLog(
+            `  ⚠️ ${bd.withoutLocation} imagem(ns) sem localização (Z) no nome`,
+            'warning'
+          )
         }
         if (bd.skipped > 0) {
-          sendLog(`  ⚠️ Ignorados ${bd.skipped} arquivo(s) fora do padrão`, "warning")
+          sendLog(
+            `  ⚠️ Ignorados ${bd.skipped} arquivo(s) fora do padrão`,
+            'warning'
+          )
         }
 
-        packerGenerateCsv(bd.files, bd.turbine, finalBladeSn, bd.bladeDir, pasta, sendLog)
+        packerGenerateCsv(
+          bd.files,
+          bd.turbine,
+          finalBladeSn,
+          bd.bladeDir,
+          pasta,
+          sendLog
+        )
       }
     } else {
-      sendLog(`Iniciando classificação de pasta única...`, "info")
-      const { turbine, blade, files, skipped, withoutLocation } = packerCollectBlade(pasta, pasta)
+      sendLog(`Iniciando classificação de pasta única...`, 'info')
+      const { turbine, blade, files, skipped, withoutLocation } =
+        packerCollectBlade(pasta, pasta)
 
       if (files.length === 0) {
-        sendLog(`Nenhuma imagem com região detectada na pasta selecionada.`, "error")
+        sendLog(
+          `Nenhuma imagem com região detectada na pasta selecionada.`,
+          'error'
+        )
         sendDone()
-        return { success: false, error: "Nenhuma imagem com região detectada." }
+        return { success: false, error: 'Nenhuma imagem com região detectada.' }
       }
 
-      sendLog(`── Pá: ${turbine}--${blade} (${files.length} imagens) ──`, "info")
+      sendLog(
+        `── Pá: ${turbine}--${blade} (${files.length} imagens) ──`,
+        'info'
+      )
       const regionCounts: Record<string, number> = {}
       files.forEach((f: any) => {
         regionCounts[f.region] = (regionCounts[f.region] || 0) + 1
       })
       PACKER_REGION_ORDER.forEach(r => {
         if (regionCounts[r]) {
-          sendLog(`  ${r}: ${regionCounts[r]} imagens`, "info")
+          sendLog(`  ${r}: ${regionCounts[r]} imagens`, 'info')
         }
       })
 
       if (withoutLocation > 0) {
-        sendLog(`  ⚠️ ${withoutLocation} imagem(ns) sem localização (Z) no nome`, "warning")
+        sendLog(
+          `  ⚠️ ${withoutLocation} imagem(ns) sem localização (Z) no nome`,
+          'warning'
+        )
       }
       if (skipped > 0) {
-        sendLog(`  ⚠️ Ignorados ${skipped} arquivo(s) fora do padrão`, "warning")
+        sendLog(`  ⚠️ Ignorados ${skipped} arquivo(s) fora do padrão`, 'warning')
       }
 
       packerGenerateCsv(files, turbine, blade, pasta, pasta, sendLog)
@@ -347,7 +415,7 @@ export async function packerPlataforma(
     sendDone()
     return { success: true }
   } catch (err: any) {
-    sendLog(`Erro no processamento do Packer: ${err.message}`, "error")
+    sendLog(`Erro no processamento do Packer: ${err.message}`, 'error')
     sendDone()
     return { success: false, error: err.message }
   }

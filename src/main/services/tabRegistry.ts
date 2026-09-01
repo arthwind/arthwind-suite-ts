@@ -13,7 +13,11 @@
  */
 import type { Page } from 'playwright'
 
-export type TabPurpose = 'defect-review' | 'video-review' | 'audit' | 'transient'
+export type TabPurpose =
+  | 'defect-review'
+  | 'video-review'
+  | 'audit'
+  | 'transient'
 
 export interface TabInfo {
   id: string
@@ -39,7 +43,10 @@ let nextId = 1
 const TRANSIENT_MAX_AGE_MS = 2 * 60 * 1000
 const SWEEP_INTERVAL_MS = 30 * 1000
 
-export function registerTab(page: Page, info: Omit<TabInfo, 'id' | 'openedAt'>): string {
+export function registerTab(
+  page: Page,
+  info: Omit<TabInfo, 'id' | 'openedAt'>
+): string {
   const id = String(nextId++)
   const full: TabInfo = { ...info, id, openedAt: Date.now() }
   tabs.set(id, { page, info: full })
@@ -61,8 +68,11 @@ export function reclassifyTab(id: string, purpose: TabPurpose): void {
  * só confundiriam sem dar nenhuma ação útil pra fazer com elas. */
 export function listReviewTabs(): TabInfo[] {
   return [...tabs.values()]
-    .map((e) => e.info)
-    .filter((info) => info.purpose === 'defect-review' || info.purpose === 'video-review')
+    .map(e => e.info)
+    .filter(
+      info =>
+        info.purpose === 'defect-review' || info.purpose === 'video-review'
+    )
     .sort((a, b) => a.openedAt - b.openedAt)
 }
 
@@ -75,7 +85,7 @@ export async function closeTab(id: string): Promise<boolean> {
 }
 
 export async function closeAllReviewTabs(): Promise<number> {
-  const ids = listReviewTabs().map((t) => t.id)
+  const ids = listReviewTabs().map(t => t.id)
   for (const id of ids) await closeTab(id)
   return ids.length
 }
@@ -85,7 +95,10 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null
 function sweepStaleTransientTabs(): void {
   const now = Date.now()
   for (const [id, entry] of tabs) {
-    if (entry.info.purpose === 'transient' && now - entry.info.openedAt > TRANSIENT_MAX_AGE_MS) {
+    if (
+      entry.info.purpose === 'transient' &&
+      now - entry.info.openedAt > TRANSIENT_MAX_AGE_MS
+    ) {
       entry.page.close().catch(() => {})
       tabs.delete(id)
     }

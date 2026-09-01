@@ -1,0 +1,34 @@
+# Maintainer: Pedro
+pkgname=arthwind-suite-ts-bin
+pkgver=1.6.0
+pkgrel=1
+pkgdesc="Arthwind Suite - Plataforma Integrada de Inspeção Eólica e Automação"
+arch=('x86_64')
+url="https://arthnex.com"
+license=('custom')
+depends=('gtk3' 'nss' 'alsa-lib')
+provides=('arthwind-suite-ts')
+conflicts=('arthwind-suite-ts')
+
+package() {
+  install -d "${pkgdir}/opt/arthwind-suite-ts"
+  cp -r "${startdir}/../../dist/linux-unpacked/"* "${pkgdir}/opt/arthwind-suite-ts/"
+
+  install -d "${pkgdir}/usr/bin"
+  ln -sf /opt/arthwind-suite-ts/arthwind-suite-ts "${pkgdir}/usr/bin/arthwind-suite-ts"
+
+  install -Dm644 "${startdir}/../../build/icon.png" "${pkgdir}/usr/share/icons/hicolor/256x256/apps/arthwind-suite-ts.png"
+  
+  install -d "${pkgdir}/usr/share/applications"
+  cat << 'EOF' > "${pkgdir}/usr/share/applications/arthwind-suite-ts.desktop"
+[Desktop Entry]
+Name=Arthwind Suite
+Exec=/opt/arthwind-suite-ts/arthwind-suite-ts %U
+Terminal=false
+Type=Application
+Icon=arthwind-suite-ts
+StartupWMClass=arthwind-suite-ts
+Comment=Arthwind Suite - Plataforma Integrada de Inspeção Eólica e Automação
+Categories=Utility;
+EOF
+}

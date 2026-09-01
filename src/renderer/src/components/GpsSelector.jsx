@@ -1,16 +1,21 @@
 // components/GpsSelector.jsx — Lista de fotos GPS para seleção da raiz (Z=0)
 
 export default function GpsSelector({ T, D, gpsFotos, gpsRaiz, setGpsRaiz }) {
-  if (gpsFotos.length === 0) return null;
+  if (gpsFotos.length === 0) return null
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div className="field-label" style={{ color: D.textMuted }}>{T.select_root}</div>
-      <div className="gps-list" style={{ border: `1px solid ${D.border}`, background: D.logBg }}>
+      <div className="field-label" style={{ color: D.textMuted }}>
+        {T.select_root}
+      </div>
+      <div
+        className="gps-list"
+        style={{ border: `1px solid ${D.border}`, background: D.logBg }}
+      >
         {gpsFotos.map((f, i) => (
           <div
             key={i}
-            className={`gps-row${gpsRaiz === f.nome ? " selected" : ""}`}
+            className={`gps-row${gpsRaiz === f.nome ? ' selected' : ''}`}
             onClick={() => setGpsRaiz(f.nome)}
           >
             <span
@@ -34,5 +39,5 @@ export default function GpsSelector({ T, D, gpsFotos, gpsRaiz, setGpsRaiz }) {
         </div>
       )}
     </div>
-  );
+  )
 }

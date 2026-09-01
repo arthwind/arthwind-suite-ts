@@ -6,12 +6,14 @@
  * não só nos pontos de pausar/parar/fechar.
  */
 import fs from 'fs'
-import path from 'path'
 import os from 'os'
+import path from 'path'
 
 function logsDir(): string {
   const appdata = process.env.APPDATA
-  const dir = appdata ? path.join(appdata, 'ArthwindSuite', 'logs') : path.join(os.tmpdir(), 'ArthwindSuite', 'logs')
+  const dir = appdata
+    ? path.join(appdata, 'ArthwindSuite', 'logs')
+    : path.join(os.tmpdir(), 'ArthwindSuite', 'logs')
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }
@@ -40,13 +42,17 @@ function sanitizeForFilename(s: string): string {
  * pra facilitar subir manualmente sem precisar vasculhar o log inteiro em
  * busca do que faltou. Sobrescreve a cada rodada: o arquivo reflete sempre o
  * estado mais recente daquela turbina, não um histórico acumulado. */
-export function writeTurbinePendingReport(wtg: string, incNumber: string, missing: string[]): string {
+export function writeTurbinePendingReport(
+  wtg: string,
+  incNumber: string,
+  missing: string[]
+): string {
   const filePath = path.join(
     pendenciasDir(),
     `${sanitizeForFilename(wtg)} - ${sanitizeForFilename(incNumber)} - pendencias.txt`
   )
   const header = `Turbina: ${wtg}\nINC: ${incNumber}\nGerado em: ${new Date().toLocaleString('pt-BR')}\n\nPendências (${missing.length}):\n`
-  const body = missing.map((m) => `- ${m}`).join('\n')
+  const body = missing.map(m => `- ${m}`).join('\n')
   fs.writeFileSync(filePath, header + body + '\n', 'utf-8')
   return filePath
 }
@@ -66,7 +72,10 @@ export class RunLogger {
   private stream: fs.WriteStream
 
   constructor(prefix: string) {
-    this.filePath = path.join(logsDir(), `${prefix}_${fileStamp(new Date())}.log`)
+    this.filePath = path.join(
+      logsDir(),
+      `${prefix}_${fileStamp(new Date())}.log`
+    )
     this.stream = fs.createWriteStream(this.filePath, { flags: 'a' })
   }
 
@@ -107,7 +116,7 @@ export function wrapWithRunLogger(
       logger.write(msg)
       log(msg, type)
     },
-    logger
+    logger,
   }
 }
 

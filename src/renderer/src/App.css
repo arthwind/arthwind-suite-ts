@@ -1,9 +1,11 @@
 /* App.css — Design system com CSS custom properties para tema dark/light */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
-html, body, #root {
+html,
+body,
+#root {
   width: 100%;
   height: 100%;
   margin: 0;
@@ -23,7 +25,7 @@ html, body, #root {
   --bg-deep: #eef1f7;
   --bg-panel: #f0f3f9;
   --bg-card: #ffffff;
-  --border: rgba(46, 90, 160, 0.10);
+  --border: rgba(46, 90, 160, 0.1);
   --border-light: rgba(46, 90, 160, 0.06);
   --accent: #2e5aa0;
   --accent-soft: rgba(46, 90, 160, 0.08);
@@ -72,13 +74,20 @@ html, body, #root {
 }
 
 /* ─── Scrollbar ────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-thumb { background: rgba(78, 143, 212, 0.33); border-radius: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(78, 143, 212, 0.33);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 
 /* ─── App Shell ────────────────────────────────────────────────────────── */
 .app-shell {
-  font-family: 'Inter', system-ui, 'Segoe UI', sans-serif;
+  font-family: "Inter", system-ui, "Segoe UI", sans-serif;
   background: var(--bg);
   background-image: var(--bg-pattern);
   background-size: 60px 104px;
@@ -226,8 +235,12 @@ html, body, #root {
 }
 
 @keyframes indeterminate {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
 }
 
 /* ─── Body Layout ──────────────────────────────────────────────────────── */
@@ -244,7 +257,8 @@ html, body, #root {
   flex-shrink: 0;
   overflow-y: auto;
   padding: 10px 0;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, padding 0.3s ease, border-color 0.3s;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease,
+    padding 0.3s ease, border-color 0.3s;
 }
 
 .sidebar.collapsed {
@@ -553,8 +567,13 @@ html, body, #root {
 }
 
 @keyframes pulse-btn {
-  0%, 100% { box-shadow: 0 2px 12px rgba(78, 143, 212, 0.27); }
-  50%      { box-shadow: 0 4px 24px rgba(78, 143, 212, 0.4); }
+  0%,
+  100% {
+    box-shadow: 0 2px 12px rgba(78, 143, 212, 0.27);
+  }
+  50% {
+    box-shadow: 0 4px 24px rgba(78, 143, 212, 0.4);
+  }
 }
 
 .sec-btn {
@@ -721,8 +740,14 @@ html, body, #root {
 }
 
 @keyframes fadein {
-  from { opacity: 0; transform: translateY(2px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ─── Status Bar ───────────────────────────────────────────────────────── */
@@ -1102,4 +1127,3 @@ html, body, #root {
   filter: brightness(1.08);
   transform: translateY(-1px);
 }
-

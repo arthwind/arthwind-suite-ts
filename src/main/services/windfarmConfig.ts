@@ -37,9 +37,11 @@ export function listWindfarmConfigs(): WindfarmConfig[] {
   }
 }
 
-export function saveWindfarmConfig(config: WindfarmConfig): { success: boolean } {
+export function saveWindfarmConfig(config: WindfarmConfig): {
+  success: boolean
+} {
   const all = listWindfarmConfigs()
-  const idx = all.findIndex((c) => c.windfarm === config.windfarm)
+  const idx = all.findIndex(c => c.windfarm === config.windfarm)
   if (idx >= 0) all[idx] = config
   else all.push(config)
 
@@ -50,7 +52,7 @@ export function saveWindfarmConfig(config: WindfarmConfig): { success: boolean }
 }
 
 export function deleteWindfarmConfig(windfarm: string): { success: boolean } {
-  const all = listWindfarmConfigs().filter((c) => c.windfarm !== windfarm)
+  const all = listWindfarmConfigs().filter(c => c.windfarm !== windfarm)
   fs.writeFileSync(configPath(), JSON.stringify(all, null, 2) + '\n', 'utf-8')
   return { success: true }
 }
@@ -61,5 +63,5 @@ export function deleteWindfarmConfig(windfarm: string): { success: boolean } {
  * o parque ainda não foi cadastrado — quem chama decide se avisa e segue sem
  * preencher, ou aborta. */
 export function getWindfarmConfig(windfarm: string): WindfarmConfig | null {
-  return listWindfarmConfigs().find((c) => c.windfarm === windfarm) ?? null
+  return listWindfarmConfigs().find(c => c.windfarm === windfarm) ?? null
 }

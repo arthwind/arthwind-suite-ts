@@ -1,4 +1,4 @@
-import Store from 'electron-store'
+import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
@@ -8,50 +8,56 @@ interface AppConfigSchema {
   lastPaths: Record<string, string>
 }
 
-// Mesma pasta usada por todos os outros serviços (windfarmConfig.ts,
-// bladeSets.ts, runLogger.ts) e pelo config.json legado da era
-// Python/pywebview — fixada explicitamente em vez de deixar o electron-store
-// derivar do productName ("Arthwind Suite", com espaço), que cairia numa
-// pasta %APPDATA% diferente. Como o nome e a pasta são os mesmos do arquivo
-// legado, o electron-store já carrega o config.json existente como próprio
-// store na primeira leitura — não precisa de migração separada.
 const appData =
   process.env.APPDATA ||
   (process.platform === 'darwin'
     ? path.join(os.homedir(), 'Library', 'Application Support')
     : path.join(os.homedir(), '.config'))
 const configDir = path.join(appData, 'ArthwindSuite')
+const configFile = path.join(configDir, 'config.json')
 
-const store = new Store<AppConfigSchema>({
-  name: 'config',
-  cwd: configDir,
-  defaults: {
+function loadConfig(): AppConfigSchema {
+  try {
+    if (fs.existsSync(configFile)) {
+      return JSON.parse(fs.readFileSync(configFile, 'utf-8'))
+    }
+  } catch {}
+  return {
     debug: false,
     theme: 'light',
-    lastPaths: {}
+    lastPaths: {},
   }
-})
+}
+
+function saveConfig(cfg: Partial<AppConfigSchema>): void {
+  try {
+    fs.mkdirSync(configDir, { recursive: true })
+    const current = loadConfig()
+    const updated = { ...current, ...cfg }
+    fs.writeFileSync(configFile, JSON.stringify(updated, null, 2), 'utf-8')
+  } catch {}
+}
 
 export function getDebugMode(): boolean {
-  return store.get('debug')
+  return loadConfig().debug ?? false
 }
 
 export function setDebugMode(enabled: boolean): void {
-  store.set('debug', enabled)
+  saveConfig({ debug: enabled })
 }
 
 export function getThemeMode(): string {
-  return store.get('theme')
+  return loadConfig().theme || 'light'
 }
 
 export function setThemeMode(mode: string): void {
-  store.set('theme', mode)
+  saveConfig({ theme: mode })
 }
 
 export function getLastPaths(): Record<string, string> {
-  return store.get('lastPaths')
+  return loadConfig().lastPaths || {}
 }
 
 export function setLastPaths(paths: Record<string, string>): void {
-  store.set('lastPaths', paths)
+  saveConfig({ lastPaths: paths })
 }

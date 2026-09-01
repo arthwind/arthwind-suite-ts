@@ -29,6 +29,15 @@ asarUnpack:
 win:
   executableName: arthwind-suite-ts
   icon: build/icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -47,8 +56,7 @@ dmg:
 linux:
   target:
     - AppImage
-    - snap
-    - deb
+    - dir
   maintainer: electronjs.org
   category: Utility
 appImage:

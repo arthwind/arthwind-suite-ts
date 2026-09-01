@@ -15,14 +15,14 @@ import sharp from 'sharp'
 
 export type PolygonPoint = { x: number; y: number }
 
-export const PINHOLE_WIDTH  = 5568
+export const PINHOLE_WIDTH = 5568
 export const PINHOLE_HEIGHT = 4176
 
-const ASPECT        = PINHOLE_WIDTH / PINHOLE_HEIGHT
-const MIN_HFOV_DEG  = 90
-const MAX_HFOV_DEG  = 140
-const FRAME_MARGIN  = 1.1
-const MIN_RAY_Z     = Math.cos((80 * Math.PI) / 180)
+const ASPECT = PINHOLE_WIDTH / PINHOLE_HEIGHT
+const MIN_HFOV_DEG = 90
+const MAX_HFOV_DEG = 140
+const FRAME_MARGIN = 1.1
+const MIN_RAY_Z = Math.cos((80 * Math.PI) / 180)
 
 type CameraRay = { x: number; y: number; z: number }
 
@@ -64,7 +64,7 @@ export function equirectPolygonCenter(
   const offset =
     points.reduce((sum, point) => {
       const dx = point.x - reference
-      if (dx >  half) return sum + dx - panoWidth
+      if (dx > half) return sum + dx - panoWidth
       if (dx < -half) return sum + dx + panoWidth
       return sum + dx
     }, 0) / points.length
@@ -88,12 +88,12 @@ export function equirectPolygonToPinhole(
   if (points.length < 3) return points
 
   const camera = resolveCamera(points, srcWidth, srcHeight)
-  const rays    = points.map(point =>
+  const rays = points.map(point =>
     toCameraRay(point, srcWidth, srcHeight, camera)
   )
 
   const projected = clipToCameraFront(rays).map(ray => ({
-    x: (ray.x / ray.z) * camera.focalX + PINHOLE_WIDTH  / 2,
+    x: (ray.x / ray.z) * camera.focalX + PINHOLE_WIDTH / 2,
     y: PINHOLE_HEIGHT / 2 - (ray.y / ray.z) * camera.focalY,
   }))
 
@@ -121,7 +121,7 @@ export async function renderEquirectPinhole(
   srcBuffer: Buffer,
   points: PolygonPoint[]
 ): Promise<RawEquirectRender> {
-  const src      = sharp(srcBuffer)
+  const src = sharp(srcBuffer)
   const metadata = await src.metadata()
   if (!metadata.width || !metadata.height) {
     throw new Error('Unable to read image dimensions')
@@ -132,13 +132,13 @@ export async function renderEquirectPinhole(
   const channels = (metadata.channels === 4 ? 4 : 3) as 3 | 4
 
   const camera = resolveCamera(points, srcW, srcH)
-  const outW   = PINHOLE_WIDTH
-  const outH   = PINHOLE_HEIGHT
+  const outW = PINHOLE_WIDTH
+  const outH = PINHOLE_HEIGHT
 
-  const cosYaw    = Math.cos(camera.centerYaw)
-  const sinYaw    = Math.sin(camera.centerYaw)
-  const cosPitch  = Math.cos(camera.centerPitch)
-  const sinPitch  = Math.sin(camera.centerPitch)
+  const cosYaw = Math.cos(camera.centerYaw)
+  const sinYaw = Math.sin(camera.centerYaw)
+  const cosPitch = Math.cos(camera.centerPitch)
+  const sinPitch = Math.sin(camera.centerPitch)
 
   const { data: srcData } = await src
     .raw()
@@ -153,22 +153,22 @@ export async function renderEquirectPinhole(
     for (let px = 0; px < outW; px++) {
       const rayX = (px - outW / 2) / camera.focalX
       const rayY = rayYNorm
-      const len  = Math.sqrt(rayX * rayX + rayY * rayY + 1)
-      const nx   = rayX / len
-      const ny   = rayY / len
-      const nz   = 1   / len
+      const len = Math.sqrt(rayX * rayX + rayY * rayY + 1)
+      const nx = rayX / len
+      const ny = rayY / len
+      const nz = 1 / len
 
       // Undo pitch rotation (inverse of forward pitch in toCameraRay)
-      const y2   =  ny * cosPitch - nz * sinPitch
-      const z2   =  ny * sinPitch + nz * cosPitch
+      const y2 = ny * cosPitch - nz * sinPitch
+      const z2 = ny * sinPitch + nz * cosPitch
 
       // Undo yaw rotation (inverse of forward yaw in toCameraRay)
-      const x3   =  nx * cosYaw  + z2 * sinYaw
-      const z3   = -nx * sinYaw  + z2 * cosYaw
+      const x3 = nx * cosYaw + z2 * sinYaw
+      const z3 = -nx * sinYaw + z2 * cosYaw
 
       // World → equirectangular UV
       const theta = Math.atan2(x3, z3)
-      const phi   = Math.asin(y2 < -1 ? -1 : y2 > 1 ? 1 : y2)
+      const phi = Math.asin(y2 < -1 ? -1 : y2 > 1 ? 1 : y2)
 
       const u = (theta / Math.PI + 1) * 0.5
       const v = 0.5 - phi / Math.PI
@@ -191,15 +191,17 @@ export async function renderEquirectPinhole(
       const off11 = y1 * srcStride + x1 * channels
 
       const w00 = dx1 * dy1
-      const w10 = dx  * dy1
+      const w10 = dx * dy1
       const w01 = dx1 * dy
-      const w11 = dx  * dy
+      const w11 = dx * dy
 
       const idx = (py * outW + px) * channels
       for (let c = 0; c < channels; c++) {
         dstData[idx + c] = Math.round(
-          srcData[off00 + c] * w00 + srcData[off10 + c] * w10 +
-          srcData[off01 + c] * w01 + srcData[off11 + c] * w11
+          srcData[off00 + c] * w00 +
+            srcData[off10 + c] * w10 +
+            srcData[off01 + c] * w01 +
+            srcData[off11 + c] * w11
         )
       }
     }
@@ -217,7 +219,7 @@ function resolveCamera(
 ): PinholeCamera {
   const center = equirectPolygonCenter(points, srcWidth)
   const orientation = {
-    centerYaw:   ((center.x / srcWidth) * 2 - 1) * Math.PI,
+    centerYaw: ((center.x / srcWidth) * 2 - 1) * Math.PI,
     centerPitch: (center.y / srcHeight - 0.5) * Math.PI,
   }
 
@@ -231,14 +233,15 @@ function resolveCamera(
     hfovDeg = Math.max(
       hfovDeg,
       toDegrees(2 * Math.atan((Math.abs(ray.x) / ray.z) * FRAME_MARGIN)),
-      toDegrees(2 * Math.atan((Math.abs(ray.y) / ray.z) * FRAME_MARGIN)) * ASPECT
+      toDegrees(2 * Math.atan((Math.abs(ray.y) / ray.z) * FRAME_MARGIN)) *
+        ASPECT
     )
   }
   hfovDeg = Math.min(hfovDeg, MAX_HFOV_DEG)
 
   return {
     ...orientation,
-    focalX: PINHOLE_WIDTH  / (2 * Math.tan(toRadians(hfovDeg)          / 2)),
+    focalX: PINHOLE_WIDTH / (2 * Math.tan(toRadians(hfovDeg) / 2)),
     focalY: PINHOLE_HEIGHT / (2 * Math.tan(toRadians(hfovDeg / ASPECT) / 2)),
   }
 }
@@ -250,23 +253,23 @@ function toCameraRay(
   orientation: Pick<PinholeCamera, 'centerYaw' | 'centerPitch'>
 ): CameraRay {
   const theta = ((point.x / srcWidth) * 2 - 1) * Math.PI
-  const phi   = (0.5 - point.y / srcHeight) * Math.PI
+  const phi = (0.5 - point.y / srcHeight) * Math.PI
 
   const worldX = Math.cos(phi) * Math.sin(theta)
   const worldY = Math.sin(phi)
   const worldZ = Math.cos(phi) * Math.cos(theta)
 
-  const cosYaw   = Math.cos(orientation.centerYaw)
-  const sinYaw   = Math.sin(orientation.centerYaw)
+  const cosYaw = Math.cos(orientation.centerYaw)
+  const sinYaw = Math.sin(orientation.centerYaw)
   const cosPitch = Math.cos(orientation.centerPitch)
   const sinPitch = Math.sin(orientation.centerPitch)
 
-  const x = worldX * cosYaw   - worldZ * sinYaw
-  const z = worldX * sinYaw   + worldZ * cosYaw
+  const x = worldX * cosYaw - worldZ * sinYaw
+  const z = worldX * sinYaw + worldZ * cosYaw
 
   return {
     x,
-    y:  worldY * cosPitch + z * sinPitch,
+    y: worldY * cosPitch + z * sinPitch,
     z: -worldY * sinPitch + z * cosPitch,
   }
 }
@@ -276,10 +279,10 @@ function clipToCameraFront(rays: CameraRay[]): CameraRay[] {
 
   const clipped: CameraRay[] = []
   for (let i = 0; i < rays.length; i++) {
-    const current       = rays[i]
-    const next          = rays[(i + 1) % rays.length]
+    const current = rays[i]
+    const next = rays[(i + 1) % rays.length]
     const currentInside = current.z > MIN_RAY_Z
-    const nextInside    = next.z    > MIN_RAY_Z
+    const nextInside = next.z > MIN_RAY_Z
 
     if (currentInside) clipped.push(current)
     if (currentInside !== nextInside) {
@@ -295,10 +298,18 @@ function clipToCameraFront(rays: CameraRay[]): CameraRay[] {
 }
 
 const FRAME_EDGES = [
-  { inside: (p: PolygonPoint) => p.x >= 0,             axis: 'x' as const, limit: 0            },
-  { inside: (p: PolygonPoint) => p.x <= PINHOLE_WIDTH,  axis: 'x' as const, limit: PINHOLE_WIDTH },
-  { inside: (p: PolygonPoint) => p.y >= 0,             axis: 'y' as const, limit: 0            },
-  { inside: (p: PolygonPoint) => p.y <= PINHOLE_HEIGHT, axis: 'y' as const, limit: PINHOLE_HEIGHT},
+  { inside: (p: PolygonPoint) => p.x >= 0, axis: 'x' as const, limit: 0 },
+  {
+    inside: (p: PolygonPoint) => p.x <= PINHOLE_WIDTH,
+    axis: 'x' as const,
+    limit: PINHOLE_WIDTH,
+  },
+  { inside: (p: PolygonPoint) => p.y >= 0, axis: 'y' as const, limit: 0 },
+  {
+    inside: (p: PolygonPoint) => p.y <= PINHOLE_HEIGHT,
+    axis: 'y' as const,
+    limit: PINHOLE_HEIGHT,
+  },
 ]
 
 function clipToFrame(polygon: PolygonPoint[]): PolygonPoint[] {
@@ -307,8 +318,8 @@ function clipToFrame(polygon: PolygonPoint[]): PolygonPoint[] {
     if (!current.length) return current
     const output: PolygonPoint[] = []
     for (let i = 0; i < current.length; i++) {
-      const a       = current[i]
-      const b       = current[(i + 1) % current.length]
+      const a = current[i]
+      const b = current[(i + 1) % current.length]
       const aInside = edge.inside(a)
       if (aInside) output.push(a)
       if (aInside !== edge.inside(b)) {
@@ -320,5 +331,9 @@ function clipToFrame(polygon: PolygonPoint[]): PolygonPoint[] {
   }, polygon)
 }
 
-function toDegrees(radians: number): number { return (radians * 180) / Math.PI }
-function toRadians(degrees: number): number { return (degrees * Math.PI) / 180 }
+function toDegrees(radians: number): number {
+  return (radians * 180) / Math.PI
+}
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180
+}

@@ -54,15 +54,21 @@ function extractReferencedVideosFromCsv(csvPath: string): string[] {
 /**
  * Verifica se o arquivo é um vídeo MP4 esférico ou válido lendo seus primeiros bytes.
  */
-function isValidSourceVideo(filePath: string): { valid: boolean; reason?: string } {
+function isValidSourceVideo(filePath: string): {
+  valid: boolean
+  reason?: string
+} {
   try {
     const stat = fs.statSync(filePath)
     if (stat.size === 0) {
       return { valid: false, reason: 'Arquivo zerado (0 bytes)' }
     }
-    
+
     if (stat.size < 1024 * 1024) {
-      return { valid: false, reason: `Arquivo muito pequeno (${(stat.size / 1024).toFixed(1)} KB)` }
+      return {
+        valid: false,
+        reason: `Arquivo muito pequeno (${(stat.size / 1024).toFixed(1)} KB)`,
+      }
     }
 
     const buffer = Buffer.alloc(512)
@@ -72,12 +78,18 @@ function isValidSourceVideo(filePath: string): { valid: boolean; reason?: string
 
     const isMp4 = buffer.includes(Buffer.from('ftyp'))
     if (!isMp4) {
-      return { valid: false, reason: 'Formato de container MP4 inválido (atom ftyp não encontrado)' }
+      return {
+        valid: false,
+        reason: 'Formato de container MP4 inválido (atom ftyp não encontrado)',
+      }
     }
 
     return { valid: true }
   } catch (err: any) {
-    return { valid: false, reason: `Erro ao inspecionar cabeçalho: ${err.message}` }
+    return {
+      valid: false,
+      reason: `Erro ao inspecionar cabeçalho: ${err.message}`,
+    }
   }
 }
 
@@ -96,7 +108,10 @@ export async function substituirVideos360(
     sendLog(`Origem (Insta360 Studio Output): ${outputFolder}`, 'info')
     sendLog(`Destino (Turbinas): ${targetFolder}`, 'info')
     if (dryRun) {
-      sendLog(`[DRY-RUN] Simulação ativa. Nenhum arquivo físico será modificado.`, 'warning')
+      sendLog(
+        `[DRY-RUN] Simulação ativa. Nenhum arquivo físico será modificado.`,
+        'warning'
+      )
     }
 
     if (!fs.existsSync(outputFolder)) {
@@ -118,7 +133,10 @@ export async function substituirVideos360(
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
           scanSource(fullPath)
-        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.mp4')) {
+        } else if (
+          entry.isFile() &&
+          entry.name.toLowerCase().endsWith('.mp4')
+        ) {
           try {
             const stat = fs.statSync(fullPath)
             const nKey = normName(entry.name)
@@ -131,10 +149,16 @@ export async function substituirVideos360(
     }
 
     scanSource(outputFolder)
-    sendLog(`Escaneamento da origem concluído: ${sourceMap.size} vídeo(s) MP4 mapeado(s).`, 'info')
+    sendLog(
+      `Escaneamento da origem concluído: ${sourceMap.size} vídeo(s) MP4 mapeado(s).`,
+      'info'
+    )
 
     // 2. Escanear a pasta de destino (Turbinas) e buscar correspondências
-    sendLog(`Buscando vídeos correspondentes nas pastas das turbinas...`, 'info')
+    sendLog(
+      `Buscando vídeos correspondentes nas pastas das turbinas...`,
+      'info'
+    )
 
     type TargetMatch = {
       fullPath: string
@@ -144,7 +168,7 @@ export async function substituirVideos360(
       name: string
       locationStr: string
     }
-    
+
     const matches: TargetMatch[] = []
     const existingLocalVideoNames = new Set<string>()
 
@@ -154,7 +178,10 @@ export async function substituirVideos360(
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
           scanTarget(fullPath)
-        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.mp4')) {
+        } else if (
+          entry.isFile() &&
+          entry.name.toLowerCase().endsWith('.mp4')
+        ) {
           const nKey = normName(entry.name)
           existingLocalVideoNames.add(nKey)
           existingLocalVideoNames.add(entry.name.toLowerCase())
@@ -174,7 +201,7 @@ export async function substituirVideos360(
               srcSize: srcInfo.size,
               dstSize,
               name: entry.name,
-              locationStr: parts.slice(0, -1).join(' ➔ ')
+              locationStr: parts.slice(0, -1).join(' ➔ '),
             })
           }
         }
@@ -192,7 +219,8 @@ export async function substituirVideos360(
 
     // 3. Processamento de Substituição com Cópia Atômica e Tratamento de Bloqueio
     for (let i = 0; i < matches.length; i++) {
-      const { fullPath, srcPath, srcSize, dstSize, name, locationStr } = matches[i]
+      const { fullPath, srcPath, srcSize, dstSize, name, locationStr } =
+        matches[i]
 
       if (i % 5 === 0 || i === matches.length - 1) {
         sender.send('arthprogress', { current: i + 1, total: matches.length })
@@ -201,20 +229,29 @@ export async function substituirVideos360(
       // Validação de integridade da origem
       const checkResult = isValidSourceVideo(srcPath)
       if (!checkResult.valid) {
-        sendLog(`⚠️ Origem Inválida [${name}]: ${checkResult.reason}. Substituição ignorada.`, 'warning')
+        sendLog(
+          `⚠️ Origem Inválida [${name}]: ${checkResult.reason}. Substituição ignorada.`,
+          'warning'
+        )
         totalInvalid++
         continue
       }
 
       // Se o tamanho do destino já for idêntico ao da origem, pula para evitar re-cópia desnecessária
       if (srcSize === dstSize && dstSize > 0) {
-        sendLog(`⏭️ [Já Atualizado] ${name} em [${locationStr}] (${(srcSize / (1024 * 1024)).toFixed(1)} MB)`, 'info')
+        sendLog(
+          `⏭️ [Já Atualizado] ${name} em [${locationStr}] (${(srcSize / (1024 * 1024)).toFixed(1)} MB)`,
+          'info'
+        )
         totalSkipped++
         continue
       }
 
       if (dryRun) {
-        sendLog(`[Dry-run] Substituiria: ${name} em [${locationStr}] (${(srcSize / (1024 * 1024)).toFixed(1)} MB)`, 'success')
+        sendLog(
+          `[Dry-run] Substituiria: ${name} em [${locationStr}] (${(srcSize / (1024 * 1024)).toFixed(1)} MB)`,
+          'success'
+        )
         totalReplaced++
       } else {
         const tmpPath = `${fullPath}.tmp`
@@ -229,18 +266,33 @@ export async function substituirVideos360(
             }
           }
 
-          sendLog(`✔ Substituído: ${name} em [${locationStr}] (${(srcSize / (1024 * 1024)).toFixed(1)} MB)`, 'success')
+          sendLog(
+            `✔ Substituído: ${name} em [${locationStr}] (${(srcSize / (1024 * 1024)).toFixed(1)} MB)`,
+            'success'
+          )
           totalReplaced++
         } catch (err: any) {
           if (fs.existsSync(tmpPath)) {
-            try { await fs.promises.unlink(tmpPath) } catch (e) {}
+            try {
+              await fs.promises.unlink(tmpPath)
+            } catch (e) {}
           }
 
-          if (err.code === 'EBUSY' || err.code === 'EPERM' || (err.message && err.message.includes('busy'))) {
-            sendLog(`⚠️ Arquivo Bloqueado pelo Windows/Player [${name}] em [${locationStr}]. Feche o player/visualizador.`, 'warning')
+          if (
+            err.code === 'EBUSY' ||
+            err.code === 'EPERM' ||
+            (err.message && err.message.includes('busy'))
+          ) {
+            sendLog(
+              `⚠️ Arquivo Bloqueado pelo Windows/Player [${name}] em [${locationStr}]. Feche o player/visualizador.`,
+              'warning'
+            )
             totalLocked++
           } else {
-            sendLog(`❌ Erro ao substituir ${name} em [${locationStr}]: ${err.message}`, 'error')
+            sendLog(
+              `❌ Erro ao substituir ${name} em [${locationStr}]: ${err.message}`,
+              'error'
+            )
             totalLocked++
           }
         }
@@ -248,7 +300,10 @@ export async function substituirVideos360(
     }
 
     // 4. Auditoria Precisa por Conteúdo de CSV de Telemetria e Geração de Relatório .txt
-    sendLog(`\nAuditando CSVs de telemetria para identificar vídeos referenciados faltantes...`, 'info')
+    sendLog(
+      `\nAuditando CSVs de telemetria para identificar vídeos referenciados faltantes...`,
+      'info'
+    )
 
     type MissingVideoItem = {
       videoName: string
@@ -265,7 +320,10 @@ export async function substituirVideos360(
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
           auditCsvFiles(fullPath)
-        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.csv')) {
+        } else if (
+          entry.isFile() &&
+          entry.name.toLowerCase().endsWith('.csv')
+        ) {
           const referencedVids = extractReferencedVideosFromCsv(fullPath)
           if (referencedVids.length > 0) {
             const relative = path.relative(targetFolder, fullPath)
@@ -275,13 +333,16 @@ export async function substituirVideos360(
             for (const vName of referencedVids) {
               const nKey = normName(vName)
               // Se o vídeo referenciado no CSV não existir na pasta de destino local
-              if (!existingLocalVideoNames.has(nKey) && !existingLocalVideoNames.has(vName.toLowerCase())) {
+              if (
+                !existingLocalVideoNames.has(nKey) &&
+                !existingLocalVideoNames.has(vName.toLowerCase())
+              ) {
                 const inSourceOutput = sourceMap.has(nKey)
                 missingReferencedVideos.push({
                   videoName: vName,
                   csvFile: entry.name,
                   locationStr,
-                  inSourceOutput
+                  inSourceOutput,
                 })
               }
             }
@@ -295,7 +356,10 @@ export async function substituirVideos360(
     // 5. Geração do Arquivo de Relatório TXT
     const now = new Date()
     const timestampStr = now.toISOString().replace('T', ' ').replace(/\..+/, '')
-    const txtReportPath = path.join(targetFolder, 'relatorio_videos_faltantes.txt')
+    const txtReportPath = path.join(
+      targetFolder,
+      'relatorio_videos_faltantes.txt'
+    )
 
     let txtContent = `===================================================================\n`
     txtContent += `RELATÓRIO DE AUDITORIA DE VÍDEOS FALTANTES - ARTHWIND SUITE\n`
@@ -307,7 +371,9 @@ export async function substituirVideos360(
     if (missingReferencedVideos.length > 0) {
       txtContent += `[VÍDEOS REFERENCIADOS NOS CSVS MAS FALTANTES NA PASTA LOCAL]\n\n`
       for (const item of missingReferencedVideos) {
-        const statusSrc = item.inSourceOutput ? '(Disponível na pasta do Insta360 Studio)' : '(NÃO encontrado no Insta360 Studio)'
+        const statusSrc = item.inSourceOutput
+          ? '(Disponível na pasta do Insta360 Studio)'
+          : '(NÃO encontrado no Insta360 Studio)'
         txtContent += `• Vídeo Faltante: ${item.videoName}\n`
         txtContent += `  Localização: ${item.locationStr}\n`
         txtContent += `  CSV Referência: ${item.csvFile}\n`
@@ -323,29 +389,56 @@ export async function substituirVideos360(
 
     try {
       fs.writeFileSync(txtReportPath, txtContent, 'utf-8')
-      sendLog(`📄 Relatório TXT gerado com sucesso: relatorio_videos_faltantes.txt`, 'success')
+      sendLog(
+        `📄 Relatório TXT gerado com sucesso: relatorio_videos_faltantes.txt`,
+        'success'
+      )
     } catch (e: any) {
-      sendLog(`⚠️ Não foi possível salvar o arquivo .txt de relatório: ${e.message}`, 'warning')
+      sendLog(
+        `⚠️ Não foi possível salvar o arquivo .txt de relatório: ${e.message}`,
+        'warning'
+      )
     }
 
     // 6. Relatório Resumido de Conclusão na Interface
     sendLog(`\n=== PROCESSAMENTO E AUDITORIA CONCLUÍDOS ===`, 'info')
     sendLog(`• Total de correspondências encontradas: ${totalFound}`, 'info')
     sendLog(`• Vídeos substituídos com sucesso: ${totalReplaced}`, 'success')
-    if (totalSkipped > 0) sendLog(`• Vídeos ignorados (já idênticos): ${totalSkipped}`, 'info')
-    if (totalLocked > 0) sendLog(`• Vídeos bloqueados por outro processo: ${totalLocked}`, 'warning')
-    if (totalInvalid > 0) sendLog(`• Vídeos da origem inválidos/zerados: ${totalInvalid}`, 'warning')
+    if (totalSkipped > 0)
+      sendLog(`• Vídeos ignorados (já idênticos): ${totalSkipped}`, 'info')
+    if (totalLocked > 0)
+      sendLog(
+        `• Vídeos bloqueados por outro processo: ${totalLocked}`,
+        'warning'
+      )
+    if (totalInvalid > 0)
+      sendLog(
+        `• Vídeos da origem inválidos/zerados: ${totalInvalid}`,
+        'warning'
+      )
 
     if (missingReferencedVideos.length > 0) {
-      sendLog(`\n⚠️ ATENÇÃO: ${missingReferencedVideos.length} vídeo(s) referenciado(s) nos CSVs de telemetria não foram encontrado(s) no local:`, 'warning')
+      sendLog(
+        `\n⚠️ ATENÇÃO: ${missingReferencedVideos.length} vídeo(s) referenciado(s) nos CSVs de telemetria não foram encontrado(s) no local:`,
+        'warning'
+      )
       for (const item of missingReferencedVideos.slice(0, 10)) {
-        sendLog(`  👉 [FALTANDO VÍDEO] ${item.videoName} em [${item.locationStr}] (CSV: ${item.csvFile})`, 'warning')
+        sendLog(
+          `  👉 [FALTANDO VÍDEO] ${item.videoName} em [${item.locationStr}] (CSV: ${item.csvFile})`,
+          'warning'
+        )
       }
       if (missingReferencedVideos.length > 10) {
-        sendLog(`  ... e mais ${missingReferencedVideos.length - 10} vídeo(s). Consulte o arquivo relatorio_videos_faltantes.txt.`, 'warning')
+        sendLog(
+          `  ... e mais ${missingReferencedVideos.length - 10} vídeo(s). Consulte o arquivo relatorio_videos_faltantes.txt.`,
+          'warning'
+        )
       }
     } else {
-      sendLog(`\n✅ Todos os vídeos de telemetria referenciados nos CSVs estão presentes!`, 'success')
+      sendLog(
+        `\n✅ Todos os vídeos de telemetria referenciados nos CSVs estão presentes!`,
+        'success'
+      )
     }
 
     return {
@@ -356,7 +449,7 @@ export async function substituirVideos360(
       totalLocked,
       totalInvalid,
       missingReferencedVideosCount: missingReferencedVideos.length,
-      txtReportPath
+      txtReportPath,
     }
   } catch (err: any) {
     sendLog(`Erro crítico durante o processamento: ${err.message}`, 'error')

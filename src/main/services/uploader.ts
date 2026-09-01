@@ -1,14 +1,15 @@
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import crypto from 'crypto'
+import { TurbinePackageItem, arthnexApi } from './arthnexApi'
 
-const BASE_URL = "https://scheduler.arthnex.com/"
-const HOMOLOG_URL = "https://scheduler-homolog.arthnex.com/"
-const API_KEY = "22F9C68C-BC34-46A5-B10F-9E58759C7B95"
+const BASE_URL = 'https://scheduler.arthnex.com/'
+const HOMOLOG_URL = 'https://scheduler-homolog.arthnex.com/'
+const API_KEY = '22F9C68C-BC34-46A5-B10F-9E58759C7B95'
 
 const HEADERS = {
-  "Content-Type": "application/json",
-  "x-api-key": API_KEY,
+  'Content-Type': 'application/json',
+  'x-api-key': API_KEY,
 }
 
 function getClientBase(useHomolog: boolean): string {
@@ -16,17 +17,35 @@ function getClientBase(useHomolog: boolean): string {
 }
 
 export async function listarWorkorders(useHomolog = false): Promise<any[]> {
-  const url = `${getClientBase(useHomolog)}get-active-workorders`
+  try {
+    arthnexApi.setEnv(useHomolog ? 'homolog' : 'production')
+    return await arthnexApi.getWorkorders()
+  } catch {
+    const url = `${getClientBase(useHomolog)}get-active-workorders`
+    const resp = await fetch(url, { headers: HEADERS })
+    if (!resp.ok)
+      throw new Error(`HTTP ${resp.status} on get-active-workorders`)
+    return resp.json() as Promise<any[]>
+  }
+}
+
+export async function listarPasPendentes(
+  workorderId: string,
+  useHomolog = false
+): Promise<any[]> {
+  const url = `${getClientBase(useHomolog)}get-blades-pending-by-wo-packages/${workorderId}`
   const resp = await fetch(url, { headers: HEADERS })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} on get-active-workorders`)
+  if (!resp.ok)
+    throw new Error(`HTTP ${resp.status} on get-blades-pending-by-wo-packages`)
   return resp.json() as Promise<any[]>
 }
 
-export async function listarPasPendentes(workorderId: string, useHomolog = false): Promise<any[]> {
-  const url = `${getClientBase(useHomolog)}get-blades-pending-by-wo-packages/${workorderId}`
-  const resp = await fetch(url, { headers: HEADERS })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} on get-blades-pending-by-wo-packages`)
-  return resp.json() as Promise<any[]>
+export async function obterHierarquiaWorkorder(
+  workorderId: string,
+  useHomolog = false
+): Promise<TurbinePackageItem[]> {
+  arthnexApi.setEnv(useHomolog ? 'homolog' : 'production')
+  return await arthnexApi.getTurbinesAndBladesByWo(workorderId)
 }
 
 function detectarSeFoto360(caminhoImagem: string): boolean {
@@ -36,7 +55,7 @@ function detectarSeFoto360(caminhoImagem: string): boolean {
     const buffer = Buffer.alloc(512 * 1024)
     const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0)
     fs.closeSync(fd)
-    
+
     const slice = buffer.subarray(0, bytesRead)
     return slice.includes('GPano:ProjectionType')
   } catch {
@@ -44,17 +63,20 @@ function detectarSeFoto360(caminhoImagem: string): boolean {
   }
 }
 
-function lerDimensoesJpeg(caminhoImagem: string): { width: number; height: number } {
+function lerDimensoesJpeg(caminhoImagem: string): {
+  width: number
+  height: number
+} {
   const buffer = fs.readFileSync(caminhoImagem)
   let i = 0
-  if (buffer[i] !== 0xFF || buffer[i + 1] !== 0xD8) {
+  if (buffer[i] !== 0xff || buffer[i + 1] !== 0xd8) {
     throw new Error('Not a valid JPEG')
   }
   i += 2
   while (i < buffer.length) {
-    if (buffer[i] === 0xFF) {
+    if (buffer[i] === 0xff) {
       const marker = buffer[i + 1]
-      if (marker === 0xC0 || marker === 0xC2) {
+      if (marker === 0xc0 || marker === 0xc2) {
         const height = buffer.readUInt16BE(i + 5)
         const width = buffer.readUInt16BE(i + 7)
         return { width, height }
@@ -75,15 +97,15 @@ function lerCsv(csvPath: string): Promise<Record<string, string>[]> {
       if (lines.length === 0) {
         return resolve([])
       }
-      
+
       const headerLine = lines[0].replace(/^\uFEFF/, '') // strip BOM
       const headers = headerLine.split(',').map(h => h.trim())
-      
+
       const results: Record<string, string>[] = []
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim()
         if (!line) continue
-        
+
         const values = line.split(',').map(v => v.trim())
         const row: Record<string, string> = {}
         headers.forEach((h, idx) => {
@@ -98,47 +120,109 @@ function lerCsv(csvPath: string): Promise<Record<string, string>[]> {
   })
 }
 
+export function stripLeadingZeros(str: string): string {
+  if (!str) return ''
+  return str.replace(/(^|[^0-9])0+(?=[0-9])/g, '$1')
+}
+
+export function isPrefixMatch(longer: string, shorter: string): boolean {
+  if (!longer || !shorter || !longer.endsWith(shorter)) return false
+  const prefixLength = longer.length - shorter.length
+  if (prefixLength === 0) return true
+  const charBefore = longer[prefixLength - 1]
+  return !/[0-9]/.test(charBefore)
+}
+
 export function normalizarBlade(name: string): string {
   if (!name) return ''
-  const s = String(name).toLowerCase().trim()
+  let s = String(name).trim().toLowerCase()
+  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  s = stripLeadingZeros(s)
   const posClean = s
     .replace(/\b(pala|pá|blade|posicao|posição|pa)\b/gi, '')
-    .replace(/[-_\s]/g, '')
-    .trim()
+    .replace(/[^a-z0-9]/g, '')
   const result = posClean || s.replace(/[-_\s]/g, '')
-
-  // Se sobrou só dígitos, remove zeros à esquerda (mantendo pelo menos 1 dígito) —
-  // bug real achado pelo usuário: o CSV trazia o SN da pá como "515", mas o
-  // Arthnex guardava a mesma pá como "0515" — sem essa tolerância a comparação
-  // estrita não batia, e nem entrava na lista de "candidatas ambíguas" pra
-  // escolher na mão, dava direto "sem match" nenhum.
-  return /^\d+$/.test(result) ? result.replace(/^0+(?=\d)/, '') : result
+  return /^\d+$/.test(result)
+    ? result.replace(/^0+(?=\d)/, '')
+    : stripLeadingZeros(result)
 }
 
 export function normalizarTurbine(name: string): string {
   if (!name) return ''
-  return String(name).toLowerCase().replace(/[^a-z0-9]/gi, '')
+  let s = String(name).trim().toLowerCase()
+  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  s = stripLeadingZeros(s)
+  s = s.replace(/[^a-z0-9]/g, '')
+  return stripLeadingZeros(s)
 }
 
-export function turbinasCombinam(csvTurbine: string, apiTurbine: string): boolean {
+export function bladesCombinam(csvBlade: string, apiBlade: string): boolean {
+  if (!csvBlade || !apiBlade) return false
+  const normCsv = normalizarBlade(csvBlade)
+  const normApi = normalizarBlade(apiBlade)
+  if (!normCsv || !normApi) return false
+  if (normCsv === normApi) return true
+  if (isPrefixMatch(normCsv, normApi) || isPrefixMatch(normApi, normCsv))
+    return true
+  return false
+}
+
+export function turbinasCombinam(
+  csvTurbine: string,
+  apiTurbine: string
+): boolean {
   if (!csvTurbine || !apiTurbine) return false
   const normCsv = normalizarTurbine(csvTurbine)
   const normApi = normalizarTurbine(apiTurbine)
   if (!normCsv || !normApi) return false
   if (normCsv === normApi) return true
-  if (normCsv.endsWith(normApi) || normApi.endsWith(normCsv)) return true
+  if (isPrefixMatch(normCsv, normApi) || isPrefixMatch(normApi, normCsv))
+    return true
   return false
 }
 
-export function inferirTurbinaDoCaminho(csvPath: string, blades: any[]): string {
-  const normPath = csvPath.toLowerCase().replace(/\\/g, '/')
-  for (const b of blades) {
-    if (!b.turbine) continue
-    const normT = normalizarTurbine(b.turbine)
-    if (normT && normT.length >= 2 && normPath.includes(normT)) {
-      return b.turbine
+export function inferirTurbinaDoCaminho(
+  csvPath: string,
+  blades: any[]
+): string {
+  if (!csvPath || !blades || blades.length === 0) return ''
+
+  // 1. Verificar padrão de nome de arquivo: {turbina}--{pá}.csv
+  const filename = path.basename(csvPath)
+  const headerMatch = filename.match(/^(.+?)--(.+?)\.csv$/i)
+  if (headerMatch) {
+    const candidate = headerMatch[1].trim()
+    for (const b of blades) {
+      if (b.turbine && turbinasCombinam(candidate, b.turbine)) {
+        return b.turbine
+      }
     }
   }
+
+  // 2. Analisar pastas ancestrais da mais profunda para a raiz
+  const normalizedPath = csvPath.replace(/\\/g, '/')
+  const segments = normalizedPath.split('/').filter(Boolean).reverse()
+
+  for (const seg of segments) {
+    for (const b of blades) {
+      if (!b.turbine) continue
+      if (turbinasCombinam(seg, b.turbine)) {
+        return b.turbine
+      }
+    }
+
+    const tokens = seg.split(/[-_\s.]+/).filter(Boolean)
+    for (const tok of tokens) {
+      if (tok.length < 2 && !/^\d+$/.test(tok)) continue
+      for (const b of blades) {
+        if (!b.turbine) continue
+        if (turbinasCombinam(tok, b.turbine)) {
+          return b.turbine
+        }
+      }
+    }
+  }
+
   return ''
 }
 
@@ -152,8 +236,14 @@ function lerCabecalhoCsv(csvPath: string): string[] {
   const buffer = Buffer.alloc(4096)
   const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0)
   fs.closeSync(fd)
-  const primeiraLinha = buffer.subarray(0, bytesRead).toString('utf-8').split(/\r?\n/)[0]
-  return primeiraLinha.replace(/^\uFEFF/, '').split(',').map(h => h.trim().toLowerCase())
+  const primeiraLinha = buffer
+    .subarray(0, bytesRead)
+    .toString('utf-8')
+    .split(/\r?\n/)[0]
+  return primeiraLinha
+    .replace(/^\uFEFF/, '')
+    .split(',')
+    .map(h => h.trim().toLowerCase())
 }
 
 function ehCsvDeUpload(csvPath: string): boolean {
@@ -179,7 +269,11 @@ export function descobrirCsvsUpload(rootPath: string): string[] {
       const fullPath = path.join(dir, entry.name)
       if (entry.isDirectory()) {
         scan(fullPath)
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.csv') && ehCsvDeUpload(fullPath)) {
+      } else if (
+        entry.isFile() &&
+        entry.name.toLowerCase().endsWith('.csv') &&
+        ehCsvDeUpload(fullPath)
+      ) {
         encontrados.push(fullPath)
       }
     }
@@ -200,26 +294,40 @@ async function processarUploadCsv(
   useHomolog: boolean,
   sendLog: (text: string, type?: string) => void,
   sendProgress: (current: number, total: number) => void
-): Promise<{ success: boolean; enviados: number; total: number; falhas: any[]; error?: string }> {
+): Promise<{
+  success: boolean
+  enviados: number
+  total: number
+  falhas: any[]
+  error?: string
+}> {
   try {
     const fotosDir = path.dirname(csvPath)
     const base = getClientBase(useHomolog)
 
     if (!rows || rows.length === 0) {
-      return { success: false, enviados: 0, total: 0, falhas: [], error: "CSV vazio ou sem linhas válidas." }
+      return {
+        success: false,
+        enviados: 0,
+        total: 0,
+        falhas: [],
+        error: 'CSV vazio ou sem linhas válidas.',
+      }
     }
 
-    const technology = pSurface === "internal" ? "Arthbot" : "Arthdrone"
+    const technology = pSurface === 'internal' ? 'Arthbot' : 'Arthdrone'
     const payload: any[] = []
     const rowsByBasename: Record<string, any> = {}
 
     for (const row of rows) {
       const rowUuid = crypto.randomUUID()
-      const baseName = path.basename(row.image_id)
+      const normalizedRelPath = (row.image_id || '').replace(/\\/g, '/')
+      const baseName = path.basename(normalizedRelPath)
       rowsByBasename[baseName] = row
-      const caminhoFoto = path.join(fotosDir, row.image_id)
-      
-      let width = 0, height = 0
+      const caminhoFoto = path.join(fotosDir, ...normalizedRelPath.split('/'))
+
+      let width = 0,
+        height = 0
       try {
         const dims = lerDimensoesJpeg(caminhoFoto)
         width = dims.width
@@ -230,39 +338,49 @@ async function processarUploadCsv(
 
       const is360 = detectarSeFoto360(caminhoFoto)
       const itemPayload: any = {
-        "type": "image/jpeg",
-        "originalFilename": baseName,
-        "location": row.distance_to_hub || "0",
-        "name": rowUuid,
-        "region": row.region || "",
-        "serial": row.blade || "",
-        "windblade_id": parseInt(windbladeId, 10),
-        "workorder_id": workorderId,
-        "width": width,
-        "height": height,
-        "date_image": collectDate,
-        "pixelSize": row.mm_px || "0.0",
-        "technology": technology,
-        "upload_source": "Office",
+        type: 'image/jpeg',
+        originalFilename: baseName,
+        location: row.distance_to_hub || '0',
+        name: rowUuid,
+        region: row.region || '',
+        serial: row.blade || '',
+        windblade_id: parseInt(windbladeId, 10),
+        workorder_id: workorderId,
+        width: width,
+        height: height,
+        date_image: collectDate,
+        pixelSize: row.mm_px || '0.0',
+        technology: technology,
+        upload_source: 'Office',
       }
       if (is360) {
-        itemPayload["is_360"] = true
+        itemPayload['is_360'] = true
       }
       payload.push(itemPayload)
     }
 
-    sendLog(`Solicitando ${payload.length} URLs pré-assinadas...`, "info")
-    
+    sendLog(`Solicitando ${payload.length} URLs pré-assinadas...`, 'info')
+
     const presignResp = await fetch(`${base}get-presign-urls-incremental`, {
       method: 'POST',
       headers: HEADERS,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     })
-    if (!presignResp.ok) throw new Error(`HTTP ${presignResp.status} on get-presign-urls-incremental`)
-    const presigns = await presignResp.json() as any[]
+    if (!presignResp.ok)
+      throw new Error(
+        `HTTP ${presignResp.status} on get-presign-urls-incremental`
+      )
+    const presigns = (await presignResp.json()) as any[]
 
     if (!presigns || presigns.length === 0) {
-      return { success: false, enviados: 0, total: 0, falhas: [], error: "Nenhuma foto retornada pelo servidor (já enviadas, ou nada a enviar)." }
+      return {
+        success: false,
+        enviados: 0,
+        total: 0,
+        falhas: [],
+        error:
+          'Nenhuma foto retornada pelo servidor (já enviadas, ou nada a enviar).',
+      }
     }
 
     await fetch(`${base}save-collect-date`, {
@@ -273,7 +391,7 @@ async function processarUploadCsv(
         collect_date: collectDate,
         turbine_id: turbineId,
         windblade_id: parseInt(windbladeId, 10),
-      })
+      }),
     })
 
     const total = presigns.length
@@ -283,8 +401,9 @@ async function processarUploadCsv(
 
     async function uploadOne(item: any): Promise<void> {
       const row = rowsByBasename[item.originalFilename]
-      const localName = row ? row.image_id : item.originalFilename
-      const localPath = path.join(fotosDir, localName)
+      const rawLocalName = (row ? row.image_id : item.originalFilename) || ''
+      const normalizedLocalName = rawLocalName.replace(/\\/g, '/')
+      const localPath = path.join(fotosDir, ...normalizedLocalName.split('/'))
 
       try {
         const fileData = fs.readFileSync(localPath)
@@ -293,19 +412,19 @@ async function processarUploadCsv(
           body: fileData,
           headers: {
             'Content-Type': 'image/jpeg',
-            'Content-Disposition': 'inline'
-          }
+            'Content-Disposition': 'inline',
+          },
         })
         if (!putResp.ok) throw new Error(`PUT falhou (${putResp.status})`)
 
         enviadosQueue.push({
           serial: item.serial,
           workorder_id: workorderId,
-          windblade_id: parseInt(windbladeId, 10)
+          windblade_id: parseInt(windbladeId, 10),
         })
       } catch (e: any) {
-        falhas.push({ arquivo: localName, erro: e.message })
-        sendLog(`Falha ao enviar ${localName}: ${e.message}`, "error")
+        falhas.push({ arquivo: normalizedLocalName, erro: e.message })
+        sendLog(`Falha ao enviar ${normalizedLocalName}: ${e.message}`, 'error')
       } finally {
         completed++
         sendProgress(completed, total)
@@ -325,7 +444,11 @@ async function processarUploadCsv(
         await uploadOne(item)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, presigns.length) }, () => worker()))
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, presigns.length) }, () =>
+        worker()
+      )
+    )
 
     const enviados = enviadosQueue.length
 
@@ -337,15 +460,24 @@ async function processarUploadCsv(
       await fetch(`${base}update-galleries-urls-queue`, {
         method: 'POST',
         headers: HEADERS,
-        body: JSON.stringify(enviadosQueue.slice(i, i + 30))
+        body: JSON.stringify(enviadosQueue.slice(i, i + 30)),
       })
     }
 
-    sendLog(`Upload concluído: ${enviados}/${total} fotos enviadas.`, falhas.length === 0 ? "success" : "warn")
+    sendLog(
+      `Upload concluído: ${enviados}/${total} fotos enviadas.`,
+      falhas.length === 0 ? 'success' : 'warn'
+    )
     return { success: true, enviados, total, falhas }
   } catch (err: any) {
-    sendLog(`Erro no upload: ${err.message}`, "error")
-    return { success: false, enviados: 0, total: 0, falhas: [], error: err.message }
+    sendLog(`Erro no upload: ${err.message}`, 'error')
+    return {
+      success: false,
+      enviados: 0,
+      total: 0,
+      falhas: [],
+      error: err.message,
+    }
   }
 }
 
@@ -364,8 +496,17 @@ export async function uploadMultiplasCsv(
   const sendProgress = (current: number, total: number) => {
     if (webContents) webContents.send('arthprogress', { current, total })
   }
-  const sendFileProgress = (fileIndex: number, fileTotal: number, fileName: string) => {
-    if (webContents) webContents.send('arthnex_batch_progress', { fileIndex, fileTotal, fileName })
+  const sendFileProgress = (
+    fileIndex: number,
+    fileTotal: number,
+    fileName: string
+  ) => {
+    if (webContents)
+      webContents.send('arthnex_batch_progress', {
+        fileIndex,
+        fileTotal,
+        fileName,
+      })
   }
 
   const resultados: any[] = []
@@ -374,14 +515,20 @@ export async function uploadMultiplasCsv(
   let arquivosComFalha = 0
 
   try {
-    sendLog(`Buscando pás pendentes da workorder para casar com os CSVs...`, 'info')
+    sendLog(
+      `Buscando pás pendentes da workorder para casar com os CSVs...`,
+      'info'
+    )
     const blades = await listarPasPendentes(workorderId, useHomolog)
 
     for (let i = 0; i < csvPaths.length; i++) {
       const csvPath = csvPaths[i]
       const fileName = path.basename(csvPath)
       sendFileProgress(i + 1, csvPaths.length, fileName)
-      sendLog(`\n=== Arquivo ${i + 1}/${csvPaths.length}: ${fileName} ===`, 'info')
+      sendLog(
+        `\n=== Arquivo ${i + 1}/${csvPaths.length}: ${fileName} ===`,
+        'info'
+      )
 
       let rows: Record<string, string>[]
       try {
@@ -400,7 +547,10 @@ export async function uploadMultiplasCsv(
       if (manualWindbladeId) {
         matched = blades.find(b => String(b.id) === String(manualWindbladeId))
         if (matched) {
-          sendLog(`   Pá selecionada manualmente ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'info')
+          sendLog(
+            `   Pá selecionada manualmente ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`,
+            'info'
+          )
         }
       }
 
@@ -413,27 +563,36 @@ export async function uploadMultiplasCsv(
           csvTurbineRaw = inferirTurbinaDoCaminho(csvPath, blades)
         }
 
-        const normCsvBlade = normalizarBlade(csvBladeRaw)
-
         // Nível 1: Match por Turbina E Pá
         const matchesNivel1 = blades.filter(b => {
-          const bladeOk = normalizarBlade(b.blade) === normCsvBlade
+          const bladeOk = bladesCombinam(csvBladeRaw, b.blade)
           const turbineOk = turbinasCombinam(csvTurbineRaw, b.turbine)
           return bladeOk && turbineOk
         })
 
         if (matchesNivel1.length === 1) {
           matched = matchesNivel1[0]
-          sendLog(`   Match automático (Turbina+Pá): ${csvBladeRaw} / ${csvTurbineRaw} ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'info')
+          sendLog(
+            `   Match automático (Turbina+Pá): ${csvBladeRaw} / ${csvTurbineRaw} ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`,
+            'info'
+          )
         } else if (matchesNivel1.length > 1) {
           matched = matchesNivel1[0]
-          sendLog(`   ⚠ Múltiplas pás encontradas para Turbina+Pá. Selecionado: Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'warning')
+          sendLog(
+            `   ⚠ Múltiplas pás encontradas para Turbina+Pá. Selecionado: Turbina: ${matched.turbine} | Pá: ${matched.blade}`,
+            'warning'
+          )
         } else {
           // Nível 2: Match por Serial Único em toda a Workorder
-          const matchesNivel2 = blades.filter(b => normalizarBlade(b.blade) === normCsvBlade)
+          const matchesNivel2 = blades.filter(b =>
+            bladesCombinam(csvBladeRaw, b.blade)
+          )
           if (matchesNivel2.length === 1) {
             matched = matchesNivel2[0]
-            sendLog(`   Match por Serial Único: ${csvBladeRaw} ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`, 'info')
+            sendLog(
+              `   Match por Serial Único: ${csvBladeRaw} ➔ Turbina: ${matched.turbine} | Pá: ${matched.blade}`,
+              'info'
+            )
           } else if (matchesNivel2.length > 1) {
             sendLog(
               `⚠ Ambiguidade Crítica no arquivo '${fileName}': A pá '${csvBladeRaw}' existe em ${matchesNivel2.length} turbinas da Workorder, porém a turbina '${csvTurbineRaw || '(não informada)'}' não bateu com nenhuma. Envio cancelado para evitar erro!`,
@@ -442,7 +601,7 @@ export async function uploadMultiplasCsv(
             resultados.push({
               arquivo: fileName,
               success: false,
-              error: `Ambiguidade: Pá '${csvBladeRaw}' existe em várias turbinas e turbina '${csvTurbineRaw}' não coincidiu.`
+              error: `Ambiguidade: Pá '${csvBladeRaw}' existe em várias turbinas e turbina '${csvTurbineRaw}' não coincidiu.`,
             })
             arquivosComFalha++
             continue
@@ -452,18 +611,38 @@ export async function uploadMultiplasCsv(
 
       if (!matched) {
         const bladeLabel = rows[0]?.blade || '(vazio)'
-        sendLog(`⚠ Pá '${bladeLabel}' do CSV '${fileName}' não foi encontrada entre as pás pendentes desta workorder. Pulando...`, 'warning')
-        resultados.push({ arquivo: fileName, success: false, error: `Pá '${bladeLabel}' não encontrada na workorder` })
+        sendLog(
+          `⚠ Pá '${bladeLabel}' do CSV '${fileName}' não foi encontrada entre as pás pendentes desta workorder. Pulando...`,
+          'warning'
+        )
+        resultados.push({
+          arquivo: fileName,
+          success: false,
+          error: `Pá '${bladeLabel}' não encontrada na workorder`,
+        })
         arquivosComFalha++
         continue
       }
 
       const r = await processarUploadCsv(
-        csvPath, rows, workorderId, String(matched.id), pSurface, collectDate, String(matched.turbine_id), useHomolog,
-        sendLog, sendProgress
+        csvPath,
+        rows,
+        workorderId,
+        String(matched.id),
+        pSurface,
+        collectDate,
+        String(matched.turbine_id),
+        useHomolog,
+        sendLog,
+        sendProgress
       )
 
-      resultados.push({ arquivo: fileName, blade: matched.blade, turbine: matched.turbine, ...r })
+      resultados.push({
+        arquivo: fileName,
+        blade: matched.blade,
+        turbine: matched.turbine,
+        ...r,
+      })
       if (r.success) {
         totalEnviados += r.enviados
         totalFotos += r.total
@@ -474,10 +653,22 @@ export async function uploadMultiplasCsv(
     }
 
     sendLog(`\n=== LOTE FINALIZADO ===`, 'info')
-    sendLog(`Arquivos processados: ${csvPaths.length}, com falha: ${arquivosComFalha}`, arquivosComFalha === 0 ? 'success' : 'warn')
-    sendLog(`Total de fotos enviadas: ${totalEnviados}/${totalFotos}`, 'success')
+    sendLog(
+      `Arquivos processados: ${csvPaths.length}, com falha: ${arquivosComFalha}`,
+      arquivosComFalha === 0 ? 'success' : 'warn'
+    )
+    sendLog(
+      `Total de fotos enviadas: ${totalEnviados}/${totalFotos}`,
+      'success'
+    )
 
-    return { success: true, resultados, totalEnviados, totalFotos, arquivosComFalha }
+    return {
+      success: true,
+      resultados,
+      totalEnviados,
+      totalFotos,
+      arquivosComFalha,
+    }
   } catch (err: any) {
     sendLog(`Erro crítico no upload em lote: ${err.message}`, 'error')
     return { success: false, error: err.message, resultados }
@@ -487,13 +678,18 @@ export async function uploadMultiplasCsv(
 export async function analisarAmbiguidadesCsvs(
   csvPaths: string[],
   blades: any[]
-): Promise<Record<string, {
-  status: 'matched' | 'ambiguous' | 'no_match' | 'empty'
-  bladeRaw: string
-  turbineRaw: string
-  matched?: any
-  candidateBlades?: any[]
-}>> {
+): Promise<
+  Record<
+    string,
+    {
+      status: 'matched' | 'ambiguous' | 'no_match' | 'empty'
+      bladeRaw: string
+      turbineRaw: string
+      matched?: any
+      candidateBlades?: any[]
+    }
+  >
+> {
   const analysis: Record<string, any> = {}
   for (const csvPath of csvPaths) {
     try {
@@ -507,10 +703,9 @@ export async function analisarAmbiguidadesCsvs(
       if (!csvTurbineRaw) {
         csvTurbineRaw = inferirTurbinaDoCaminho(csvPath, blades)
       }
-      const normCsvBlade = normalizarBlade(csvBladeRaw)
 
       const matchesNivel1 = blades.filter(b => {
-        const bladeOk = normalizarBlade(b.blade) === normCsvBlade
+        const bladeOk = bladesCombinam(csvBladeRaw, b.blade)
         const turbineOk = turbinasCombinam(csvTurbineRaw, b.turbine)
         return bladeOk && turbineOk
       })
@@ -520,18 +715,20 @@ export async function analisarAmbiguidadesCsvs(
           status: 'matched',
           bladeRaw: csvBladeRaw,
           turbineRaw: csvTurbineRaw,
-          matched: matchesNivel1[0]
+          matched: matchesNivel1[0],
         }
         continue
       }
 
-      const matchesNivel2 = blades.filter(b => normalizarBlade(b.blade) === normCsvBlade)
+      const matchesNivel2 = blades.filter(b =>
+        bladesCombinam(csvBladeRaw, b.blade)
+      )
       if (matchesNivel2.length === 1) {
         analysis[csvPath] = {
           status: 'matched',
           bladeRaw: csvBladeRaw,
           turbineRaw: csvTurbineRaw,
-          matched: matchesNivel2[0]
+          matched: matchesNivel2[0],
         }
       } else if (matchesNivel2.length > 1) {
         analysis[csvPath] = {
@@ -541,14 +738,14 @@ export async function analisarAmbiguidadesCsvs(
           candidateBlades: matchesNivel2.map(b => ({
             id: String(b.id),
             blade: b.blade,
-            turbine: b.turbine
-          }))
+            turbine: b.turbine,
+          })),
         }
       } else {
         analysis[csvPath] = {
           status: 'no_match',
           bladeRaw: csvBladeRaw,
-          turbineRaw: csvTurbineRaw
+          turbineRaw: csvTurbineRaw,
         }
       }
     } catch {
@@ -557,4 +754,3 @@ export async function analisarAmbiguidadesCsvs(
   }
   return analysis
 }
-

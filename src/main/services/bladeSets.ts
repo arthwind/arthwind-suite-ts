@@ -70,9 +70,10 @@ function loadBladeSets(): BladeSetEntry[] {
     if (cache && stat.mtimeMs === cacheMtimeMs) return cache
     const raw = fs.readFileSync(filePath, 'utf-8')
     const parsed: BladeSetEntry[] = JSON.parse(raw)
-    cache = parsed.map((e) => ({
+    cache = parsed.map(e => ({
       ...e,
-      setNumber: (e.serial && deriveSetNumberFromSerial(e.serial)) || e.setNumber
+      setNumber:
+        (e.serial && deriveSetNumberFromSerial(e.serial)) || e.setNumber,
     }))
     cacheMtimeMs = stat.mtimeMs
     return cache ?? []
@@ -94,31 +95,46 @@ export type { BladeSetEntry }
  * sempre que a turbina for conhecida, o match é restrito a ela primeiro; só cai
  * pro match global (potencialmente ambíguo) se a turbina não for informada ou
  * não tiver nenhuma pá com esse bladeSn cadastrada. */
-function findEntry(bladeSn: string | number, turbine?: string): BladeSetEntry | undefined {
-  const key = String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
+function findEntry(
+  bladeSn: string | number,
+  turbine?: string
+): BladeSetEntry | undefined {
+  const key =
+    String(bladeSn).trim().replace(/^B/i, '').replace(/^0+/, '') || '0'
   const entries = loadBladeSets()
 
   if (turbine) {
     const t = turbine.trim()
-    const scoped = entries.filter((e) => e.turbine === t || e.turbinePrefix === t || t.startsWith(e.turbinePrefix))
-    const scopedMatch = scoped.find((e) => e.bladeSn === key)
+    const scoped = entries.filter(
+      e =>
+        e.turbine === t ||
+        e.turbinePrefix === t ||
+        t.startsWith(e.turbinePrefix)
+    )
+    const scopedMatch = scoped.find(e => e.bladeSn === key)
     if (scopedMatch) return scopedMatch
   }
 
-  return entries.find((e) => e.bladeSn === key)
+  return entries.find(e => e.bladeSn === key)
 }
 
 /** Retorna o Set Number pro Blade SN dado, ou null se não achar na lista.
  * Passe `turbine` (WTG ou serial completo) sempre que disponível — o bladeSn
  * curto sozinho pode ser ambíguo entre turbinas diferentes. */
-export function getSetNumber(bladeSn: string | number, turbine?: string): string | null {
+export function getSetNumber(
+  bladeSn: string | number,
+  turbine?: string
+): string | null {
   return findEntry(bladeSn, turbine)?.setNumber ?? null
 }
 
 /** Retorna informações completas da pá (Serial de 13 dígitos e Set Number).
  * Passe `turbine` (WTG ou serial completo) sempre que disponível — o bladeSn
  * curto sozinho pode ser ambíguo entre turbinas diferentes. */
-export function getBladeInfo(bladeSn: string | number, turbine?: string): BladeInfo {
+export function getBladeInfo(
+  bladeSn: string | number,
+  turbine?: string
+): BladeInfo {
   const match = findEntry(bladeSn, turbine)
   return {
     serial: match?.serial ?? null,
@@ -137,7 +153,6 @@ export function getBladesForTurbine(wtg: string): BladeSetEntry[] {
   const key = wtg.trim()
   const entries = loadBladeSets()
   return entries
-    .filter((e) => e.turbinePrefix === key)
+    .filter(e => e.turbinePrefix === key)
     .sort((a, b) => (a.component || '').localeCompare(b.component || ''))
 }
-
