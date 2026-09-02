@@ -52,10 +52,13 @@ import {
 } from './services/automationControl'
 import { batchStitchDirectory } from './services/batch360Stitcher'
 import {
+  extractHorizonTaskIdsFromXlsx,
   horizonAnalisar,
   horizonCorrigirDamagesDireto,
   horizonGerarPacote,
+  horizonProcessarFromArthnex,
   horizonValidarRequisitos,
+  listXlsxSheets,
 } from './services/horizon'
 import {
   getLogsDir,
@@ -655,6 +658,28 @@ app.whenReady().then(() => {
       return horizonCorrigirDamagesDireto(paths, siteName, event.sender)
     }
   )
+
+  ipcMain.handle(
+    'horizon_list_xlsx_sheets',
+    async (_event, filePath: string) => {
+      return listXlsxSheets(filePath)
+    }
+  )
+
+  ipcMain.handle(
+    'horizon_extract_task_ids',
+    async (_event, filePath: string, sheetName?: string) => {
+      return extractHorizonTaskIdsFromXlsx(filePath, sheetName)
+    }
+  )
+
+  ipcMain.handle('horizon_process_from_arthnex', async (event, params: any) => {
+    return horizonProcessarFromArthnex({
+      ...params,
+      sendLog: (text: string, type?: string) =>
+        event.sender.send('log', { text, type }),
+    })
+  })
 
   // ─── Reconstruir & Rebuilder IPC Handlers ────────────────────────────────────
   ipcMain.handle('detectar_estrutura_abc', async (_event, rootPath: string) => {

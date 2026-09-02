@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
+import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
+import { arthnexApi } from './arthnexApi'
 import { parseDate } from './workflow'
 
 // ─── Constants and Interfaces ──────────────────────────────────────────────────
@@ -2011,5 +2013,429 @@ export async function horizonCorrigirDamagesDireto(
   } catch (err: any) {
     sendLog(`Erro ao higienizar damages: ${err.message}`, 'error')
     return { success: false, error: err.message }
+  }
+}
+
+// ─── Smart XLSX Sheet & Task ID Extraction ────────────────────────────────────
+
+export async function listXlsxSheets(filePath: string): Promise<{
+  success: boolean
+  sheets: Array<{ name: string; rowCount: number }>
+  error?: string
+}> {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return { success: false, sheets: [], error: 'Arquivo não encontrado' }
+    }
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(filePath)
+    const sheets = wb.worksheets.map(w => ({
+      name: w.name,
+      rowCount: w.rowCount,
+    }))
+    return { success: true, sheets }
+  } catch (err: any) {
+    return { success: false, sheets: [], error: err.message }
+  }
+}
+
+export async function extractHorizonTaskIdsFromXlsx(
+  filePath: string,
+  sheetName?: string
+): Promise<{
+  success: boolean
+  sheet: string
+  sheets: string[]
+  taskMap: Record<string, string>
+  count: number
+  error?: string
+}> {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return {
+        success: false,
+        sheet: '',
+        sheets: [],
+        taskMap: {},
+        count: 0,
+        error: 'Arquivo não encontrado',
+      }
+    }
+
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(filePath)
+    const allSheetNames = wb.worksheets.map(w => w.name)
+
+    let targetSheet: ExcelJS.Worksheet | undefined
+    if (sheetName) {
+      targetSheet = wb.worksheets.find(
+        w => w.name.trim().toLowerCase() === sheetName.trim().toLowerCase()
+      )
+    }
+    if (!targetSheet) {
+      targetSheet = wb.worksheets[0]
+    }
+
+    if (!targetSheet) {
+      return {
+        success: false,
+        sheet: '',
+        sheets: allSheetNames,
+        taskMap: {},
+        count: 0,
+        error: 'Nenhuma aba encontrada na planilha.',
+      }
+    }
+
+    let headerRowIdx = 1
+    let turbineColIdx = 1
+    let taskColIdx = 2
+
+    for (let r = 1; r <= Math.min(10, targetSheet.rowCount); r++) {
+      const rowVals = targetSheet.getRow(r).values
+      if (Array.isArray(rowVals)) {
+        rowVals.forEach((val, cIdx) => {
+          const s = String(val || '')
+            .toLowerCase()
+            .trim()
+          if (
+            s.includes('turbine') ||
+            s.includes('turbina') ||
+            s.includes('wtg') ||
+            s === 'id'
+          ) {
+            headerRowIdx = r
+            turbineColIdx = cIdx
+          }
+          if (
+            s.includes('horizon task id') ||
+            s.includes('task id') ||
+            s.includes('taskid') ||
+            s.includes('horizon id')
+          ) {
+            taskColIdx = cIdx
+          }
+        })
+      }
+      if (headerRowIdx > 1) break
+    }
+
+    const taskMap: Record<string, string> = {}
+    for (let r = headerRowIdx + 1; r <= targetSheet.rowCount; r++) {
+      const row = targetSheet.getRow(r)
+      const turbineVal = String(row.getCell(turbineColIdx).value || '').trim()
+      let taskVal = String(row.getCell(taskColIdx).value || '').trim()
+
+      if (!taskVal || taskVal === 'null' || taskVal === 'undefined') {
+        const rowVals = row.values
+        if (Array.isArray(rowVals)) {
+          for (let c = 1; c < rowVals.length; c++) {
+            const v = String(rowVals[c] || '').trim()
+            if (
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                v
+              )
+            ) {
+              taskVal = v
+              break
+            }
+          }
+        }
+      }
+
+      if (
+        turbineVal &&
+        taskVal &&
+        taskVal !== 'null' &&
+        taskVal !== 'undefined'
+      ) {
+        taskMap[turbineVal] = taskVal
+      }
+    }
+
+    return {
+      success: true,
+      sheet: targetSheet.name,
+      sheets: allSheetNames,
+      taskMap,
+      count: Object.keys(taskMap).length,
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      sheet: '',
+      sheets: [],
+      taskMap: {},
+      count: 0,
+      error: err.message,
+    }
+  }
+}
+
+// ─── Arthnex Cloud Direct Processing ──────────────────────────────────────────
+
+export interface HorizonArthnexParams {
+  workorderId: string
+  taskMap: Record<string, string>
+  selectedTurbines?: string[]
+  siteName?: string
+  inspectionType?: string
+  outputPath?: string
+  sendLog?: (msg: string, type?: string) => void
+}
+
+export async function horizonProcessarFromArthnex(
+  params: HorizonArthnexParams
+): Promise<{
+  success: boolean
+  zipPath?: string
+  summaryCount: number
+  detailsCount: number
+  damagesCount: number
+  warnings: string[]
+  error?: string
+}> {
+  const {
+    workorderId,
+    taskMap,
+    selectedTurbines,
+    siteName,
+    inspectionType = 'Autonomous Drone',
+    outputPath,
+    sendLog = () => {},
+  } = params
+
+  try {
+    sendLog(
+      `Iniciando processamento Horizon via Arthnex para a O.S. ${workorderId}...`,
+      'info'
+    )
+
+    // 1. Obter turbinas e pás da Workorder
+    const allTurbineItems =
+      await arthnexApi.getTurbinesAndBladesByWo(workorderId)
+    if (!allTurbineItems || allTurbineItems.length === 0) {
+      throw new Error(`Nenhuma turbina encontrada na O.S. ${workorderId}`)
+    }
+
+    // 2. Filtrar turbinas selecionadas se houver filtro
+    let targetTurbines = allTurbineItems
+    if (selectedTurbines && selectedTurbines.length > 0) {
+      const selNorm = new Set(selectedTurbines.map(t => normalizar(t)))
+      targetTurbines = allTurbineItems.filter(t =>
+        selNorm.has(normalizar(t.turbine))
+      )
+      sendLog(
+        `Filtro aplicado: ${targetTurbines.length} de ${allTurbineItems.length} turbina(s) selecionada(s).`,
+        'info'
+      )
+    }
+
+    if (targetTurbines.length === 0) {
+      throw new Error('Nenhuma turbina restante após aplicar o filtro.')
+    }
+
+    // 3. Mapear Horizon Task IDs com normalização fuzzy
+    const taskMapNorm: Record<string, { orig: string; taskId: string }> = {}
+    Object.entries(taskMap || {}).forEach(([k, v]) => {
+      taskMapNorm[normalizar(k)] = { orig: k, taskId: v }
+    })
+
+    const warnings: string[] = []
+    const summaryRows: any[] = []
+    const detailsRows: any[] = []
+    const zip = new JSZip()
+    const allFlags: any[] = []
+    let totalDamages = 0
+
+    // 4. Processar cada turbina
+    for (const item of targetTurbines) {
+      const turbName = item.turbine
+      const normKey = normalizar(turbName)
+      const matchedTask =
+        taskMap[turbName] || taskMapNorm[normKey]?.taskId || ''
+
+      if (!matchedTask) {
+        warnings.push(`Turbina ${turbName}: sem Horizon Task ID mapeado.`)
+      }
+
+      // Buscar data de inspeção da turbina
+      let inspectionDate = new Date().toISOString().split('T')[0]
+      try {
+        const opData = await arthnexApi.getTechnicianAndDateByTurbine(
+          turbName,
+          workorderId
+        )
+        if (opData?.date) {
+          inspectionDate = opData.date
+        }
+      } catch {
+        // fallback to today
+      }
+
+      const currentSite = siteName || item.workorder_description || 'Wind Farm'
+
+      // Summary Row
+      summaryRows.push({
+        Turbine: turbName,
+        'Horizon Task ID': matchedTask,
+        Site: currentSite,
+        ID: turbName,
+        'Inspection Date': inspectionDate,
+        'Inspection Type': inspectionType,
+      })
+
+      // Buscar defeitos de todas as pás da turbina
+      const turbineDefects: any[] = []
+      for (const blade of item.windblades || []) {
+        try {
+          const defects = await arthnexApi.getDefectsByBlade({
+            workorderId,
+            windfarmId: item.windfarm_id,
+            turbineId: item.turbine_id,
+            windbladeId: blade.windblade_id,
+          })
+
+          for (const d of defects || []) {
+            const photoName = d.image_url
+              ? path.basename(d.image_url)
+              : `photo_${d.id}.jpg`
+            turbineDefects.push({
+              'Photo File Name': photoName,
+              Date: inspectionDate,
+              Type: d.name,
+              Severity: String(d.severity || 1),
+              Width: '0',
+              Length: '0',
+              Distance: String(d.location || '0'),
+              Coordinates: d.coordinates || '',
+              Surface: d.surface || 'External',
+              'Blade Side': blade.blade_letter || blade.blade || 'A',
+            })
+
+            // Details entry para cada foto com apontamento
+            detailsRows.push({
+              ID: turbName,
+              'Horizon Task ID': matchedTask,
+              Blade: blade.blade || `Blade ${blade.blade_letter}`,
+              'Blade Side': blade.blade_letter || 'A',
+              'Radial Distance': String(d.location || '0'),
+              'File Name': photoName,
+              URL: d.image_url || '',
+            })
+          }
+        } catch (e: any) {
+          warnings.push(
+            `Erro ao consultar defeitos da pá ${blade.blade} (${turbName}): ${e.message}`
+          )
+        }
+      }
+
+      // Se houver danos, converter para SkySpecs taxonomy e gravar no ZIP
+      if (turbineDefects.length > 0) {
+        totalDamages += turbineDefects.length
+        const { convertedRows, flags } = convertDamagesDf(
+          turbineDefects,
+          `${turbName}.csv`
+        )
+        allFlags.push(...flags)
+
+        convertedRows.forEach(row => {
+          row['Turbine'] = turbName
+          row['Site'] = currentSite
+          row['Inspection Date'] = inspectionDate
+          row['Date'] = inspectionDate
+        })
+
+        zip.file(`Damages/${turbName}.csv`, toDamageCsv(convertedRows))
+      }
+    }
+
+    // 5. Adicionar Summary ao ZIP
+    zip.file('summary_final.csv', toCsv(summaryRows, ','))
+
+    // 6. Adicionar Details e particionar em lotes de 20 turbinas
+    if (detailsRows.length > 0) {
+      zip.file('details_final.csv', toCsv(detailsRows, ';'))
+      zip.file('Details/details_final.csv', toCsv(detailsRows, ';'))
+
+      // Particionamento em lotes de 20 turbinas
+      const rowsByTurbine: Record<string, any[]> = {}
+      const uniqueTurbinesInDetails: string[] = []
+
+      detailsRows.forEach(row => {
+        const turbId = String(row.ID || '').trim()
+        if (!rowsByTurbine[turbId]) {
+          rowsByTurbine[turbId] = []
+          uniqueTurbinesInDetails.push(turbId)
+        }
+        rowsByTurbine[turbId].push(row)
+      })
+
+      const CHUNK_SIZE = 20
+      for (let i = 0; i < uniqueTurbinesInDetails.length; i += CHUNK_SIZE) {
+        const chunkTurbines = uniqueTurbinesInDetails.slice(i, i + CHUNK_SIZE)
+        const chunkRows: any[] = []
+        chunkTurbines.forEach(t => {
+          chunkRows.push(...rowsByTurbine[t])
+        })
+        const loteNum = Math.floor(i / CHUNK_SIZE) + 1
+        const startNum = String(i + 1).padStart(2, '0')
+        const endNum = String(
+          Math.min(i + CHUNK_SIZE, uniqueTurbinesInDetails.length)
+        ).padStart(2, '0')
+        const loteFilename = `Details/details_lote_${loteNum}_turbinas_${startNum}_a_${endNum}.csv`
+        zip.file(loteFilename, toCsv(chunkRows, ';'))
+      }
+    }
+
+    // 7. Adicionar alertas de conversão se existirem
+    if (allFlags.length > 0) {
+      zip.file('ALERTAS_CONVERSAO.csv', toCsv(allFlags, ','))
+    }
+
+    // 8. Gerar arquivo ZIP final
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 },
+    })
+
+    let finalZipPath = outputPath
+    if (!finalZipPath) {
+      const defaultDir =
+        process.platform === 'win32'
+          ? path.join(process.env.USERPROFILE || 'C:\\', 'Downloads')
+          : path.join(process.env.HOME || '/tmp', 'Downloads')
+      finalZipPath = path.join(
+        defaultDir,
+        `Horizon_Package_${workorderId}_${Date.now()}.zip`
+      )
+    }
+
+    fs.writeFileSync(finalZipPath, zipBuffer)
+    sendLog(
+      `✔ Pacote Horizon ZIP gerado com sucesso: ${finalZipPath}`,
+      'success'
+    )
+
+    return {
+      success: true,
+      zipPath: finalZipPath,
+      summaryCount: summaryRows.length,
+      detailsCount: detailsRows.length,
+      damagesCount: totalDamages,
+      warnings,
+    }
+  } catch (err: any) {
+    sendLog(`Erro no processamento Horizon: ${err.message}`, 'error')
+    return {
+      success: false,
+      summaryCount: 0,
+      detailsCount: 0,
+      damagesCount: 0,
+      warnings: [],
+      error: err.message,
+    }
   }
 }
