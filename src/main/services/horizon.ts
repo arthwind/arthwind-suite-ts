@@ -2327,34 +2327,10 @@ export async function horizonProcessarFromArthnex(
         warnings.push(`Turbina ${turbName}: sem Horizon Task ID mapeado.`)
       }
 
-      // Buscar data de inspeção da turbina
-      let inspectionDate = new Date().toISOString().split('T')[0]
-      try {
-        const opData = await arthnexApi.getTechnicianAndDateByTurbine(
-          turbName,
-          workorderId
-        )
-        if (opData?.date) {
-          inspectionDate = opData.date
-        }
-      } catch {
-        // fallback to today
-      }
-
-      const currentSite = siteName || item.workorder_description || 'Wind Farm'
-
-      // Summary Row
-      summaryRows.push({
-        Turbine: turbName,
-        'Horizon Task ID': matchedTask,
-        Site: currentSite,
-        ID: turbName,
-        'Inspection Date': inspectionDate,
-        'Inspection Type': inspectionType,
-      })
-
       // Buscar fotos da galeria e defeitos de todas as pás da turbina
       const turbineDefects: any[] = []
+      let detectedDate = ''
+
       for (const blade of item.windblades || []) {
         try {
           // 4.1 Buscar TODAS as fotos de inspeção da galeria desta pá
@@ -2365,6 +2341,11 @@ export async function horizonProcessarFromArthnex(
 
           if (pictures && pictures.length > 0) {
             for (const pic of pictures) {
+              if (!detectedDate && pic.created_at) {
+                const parsed = formatDateIso(pic.created_at)
+                if (parsed) detectedDate = parsed
+              }
+
               const cleanName =
                 path.basename(pic.image_url || '') || `photo_${pic.id}.jpg`
               const rawLoc = Number(pic.gallery_location || 0)
@@ -2398,12 +2379,17 @@ export async function horizonProcessarFromArthnex(
           })
 
           for (const d of defects || []) {
+            if (d.date) {
+              const parsed = formatDateIso(d.date)
+              if (parsed) detectedDate = parsed
+            }
+
             const photoName = d.image_url
               ? path.basename(d.image_url)
               : `photo_${d.id}.jpg`
             turbineDefects.push({
               'Photo File Name': photoName,
-              Date: inspectionDate,
+              Date: '',
               Type: d.name,
               Severity: String(d.severity || 1),
               Width: '0',
@@ -2433,6 +2419,37 @@ export async function horizonProcessarFromArthnex(
           )
         }
       }
+
+      // 4.3 Resolver data real de inspeção da turbina
+      let inspectionDate = detectedDate
+      if (!inspectionDate) {
+        try {
+          const opData = await arthnexApi.getTechnicianAndDateByTurbine(
+            turbName,
+            workorderId
+          )
+          if (opData?.date) {
+            inspectionDate = formatDateIso(opData.date)
+          }
+        } catch {
+          // fallback
+        }
+      }
+      if (!inspectionDate) {
+        inspectionDate = formatDateIso(new Date())
+      }
+
+      const currentSite = siteName || item.workorder_description || 'Wind Farm'
+
+      // Summary Row com a data real detectada
+      summaryRows.push({
+        Turbine: turbName,
+        'Horizon Task ID': matchedTask,
+        Site: currentSite,
+        ID: turbName,
+        'Inspection Date': inspectionDate,
+        'Inspection Type': inspectionType,
+      })
 
       // Se houver danos, converter para SkySpecs taxonomy e gravar no ZIP
       if (turbineDefects.length > 0) {

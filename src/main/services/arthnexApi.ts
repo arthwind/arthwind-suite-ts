@@ -71,6 +71,7 @@ export interface ArthnexDefect {
   is_360?: boolean
   repair_action?: string
   sub_component?: string
+  date?: string
 }
 
 export interface ArthnexGalleryPicture {
@@ -669,6 +670,7 @@ export class ArthnexApiService {
       repair_action: d.recommendation?.name || d.repair_action || '',
       sub_component: d.component_name || d.sub_component || '',
       layer: d.layer?.layer || '',
+      date: d.date || '',
     }))
   }
 

@@ -109,6 +109,7 @@ describe('horizon service', () => {
         side: 'PS',
         coordinates: '[[100, 200], [150, 250]]',
         image_url: 'https://cdn.arthnex.com/photos/HIW_001_A_45.jpg',
+        date: '2026-08-20',
       } as any,
     ])
 
