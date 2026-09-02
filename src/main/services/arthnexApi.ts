@@ -142,7 +142,7 @@ export class ArthnexApiService {
   }
 
   public getEnv(): ArthnexEnv {
-    return this.authConfig?.environment || 'homolog'
+    return this.authConfig?.environment || 'production'
   }
 
   public setEnv(env: ArthnexEnv): void {
@@ -252,7 +252,7 @@ export class ArthnexApiService {
   public async login(
     email: string,
     pass: string,
-    environment: ArthnexEnv = 'homolog'
+    environment: ArthnexEnv = 'production'
   ): Promise<{
     success: boolean
     user?: any
@@ -260,7 +260,7 @@ export class ArthnexApiService {
     temp_token?: string
     error?: string
   }> {
-    const env = environment || 'homolog'
+    const env = environment || 'production'
     const baseUrl = DEFAULT_ENDPOINTS[env].backend
 
     try {
@@ -319,9 +319,9 @@ export class ArthnexApiService {
   public async verifyMfa(
     code: string,
     tempToken: string,
-    environment: ArthnexEnv = 'homolog'
+    environment: ArthnexEnv = 'production'
   ): Promise<{ success: boolean; user?: any; error?: string }> {
-    const env = environment || 'homolog'
+    const env = environment || 'production'
     const baseUrl = DEFAULT_ENDPOINTS[env].backend
 
     try {
@@ -371,7 +371,7 @@ export class ArthnexApiService {
   public setDirectToken(
     token: string,
     refreshToken?: string,
-    env: ArthnexEnv = 'homolog'
+    env: ArthnexEnv = 'production'
   ): void {
     let user: any = undefined
     try {

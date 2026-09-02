@@ -816,12 +816,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'arthnex_google_login',
-    async (_event, env: ArthnexEnv = 'homolog') => {
+    async (_event, env: ArthnexEnv = 'production') => {
       return new Promise(resolve => {
         const baseUrl =
-          env === 'homolog'
-            ? 'https://backend-homolog.arthnex.com/'
-            : 'https://backend.arthnex.com/'
+          env === 'production'
+            ? 'https://backend.arthnex.com/'
+            : 'https://backend-homolog.arthnex.com/'
         const authUrl = `${baseUrl}auth/google`
 
         const authWindow = new BrowserWindow({

@@ -108,6 +108,22 @@ export default function TopBar({
             <span style={{ color: D.success }}>●</span>
             <span
               style={{
+                fontSize: '9.5px',
+                background:
+                  authData.environment === 'homolog'
+                    ? `${D.warning}33`
+                    : `${D.success}33`,
+                color:
+                  authData.environment === 'homolog' ? D.warning : D.success,
+                padding: '1px 4px',
+                borderRadius: '3px',
+                fontWeight: 700,
+              }}
+            >
+              {authData.environment === 'homolog' ? 'HOMOLOG' : 'PROD'}
+            </span>
+            <span
+              style={{
                 fontWeight: 600,
                 maxWidth: '140px',
                 overflow: 'hidden',
