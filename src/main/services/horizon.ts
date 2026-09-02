@@ -2212,8 +2212,23 @@ export async function horizonProcessarFromArthnex(
     )
 
     // 1. Obter turbinas e pás da Workorder
-    const allTurbineItems =
-      await arthnexApi.getTurbinesAndBladesByWo(workorderId)
+    let resolvedWindfarmId = 0
+    try {
+      const wos = await arthnexApi.getWorkorders()
+      const foundWo = wos.find(
+        w => String(w.workorders_id) === String(workorderId)
+      )
+      if (foundWo && foundWo.windfarm_id) {
+        resolvedWindfarmId = foundWo.windfarm_id
+      }
+    } catch {
+      // fallback
+    }
+
+    const allTurbineItems = await arthnexApi.getTurbinesAndBladesByWo(
+      workorderId,
+      resolvedWindfarmId || undefined
+    )
     if (!allTurbineItems || allTurbineItems.length === 0) {
       throw new Error(`Nenhuma turbina encontrada na O.S. ${workorderId}`)
     }
@@ -2291,7 +2306,7 @@ export async function horizonProcessarFromArthnex(
         try {
           const defects = await arthnexApi.getDefectsByBlade({
             workorderId,
-            windfarmId: item.windfarm_id,
+            windfarmId: item.windfarm_id || resolvedWindfarmId || 0,
             turbineId: item.turbine_id,
             windbladeId: blade.windblade_id,
           })
