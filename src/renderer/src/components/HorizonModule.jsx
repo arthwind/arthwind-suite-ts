@@ -276,9 +276,24 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
     if (!invoker) return
     setLoadingWos(true)
     try {
-      const list = await invoker.arthnex_get_workorders?.()
-      if (Array.isArray(list)) {
-        setWorkorders(list)
+      let res = await invoker.arthnex_get_workorders?.('', 1, 500)
+      let list = res?.workorders || res?.data || (Array.isArray(res) ? res : [])
+      if (!list || list.length === 0) {
+        res = await invoker.arthnex_listar_workorders?.(false)
+        list = res?.data || res?.workorders || (Array.isArray(res) ? res : [])
+      }
+      if (Array.isArray(list) && list.length > 0) {
+        const normalized = list.map(w => ({
+          id: String(w.id || w.workorders_id),
+          workorders_id: String(w.workorders_id || w.id),
+          description:
+            w.description || w.workorder_description || w.id || 'Sem descrição',
+          client_name: w.client_name || '',
+          windfarm_local: w.windfarm_local || '',
+          windfarm_id: w.windfarm_id || 0,
+        }))
+        normalized.sort((a, b) => a.description.localeCompare(b.description))
+        setWorkorders(normalized)
       }
     } catch (e) {
       console.error('Falha ao carregar workorders do Arthnex:', e)
@@ -308,11 +323,12 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
 
     setLoadingTurbines(true)
     try {
-      const turbines = await invoker.arthnex_get_turbines_blades?.(woId)
-      if (Array.isArray(turbines)) {
-        setWoTurbines(turbines)
+      const res = await invoker.arthnex_get_turbines_blades?.(woId)
+      const list = res?.data || res?.turbines || (Array.isArray(res) ? res : [])
+      if (Array.isArray(list) && list.length > 0) {
+        setWoTurbines(list)
         // Seleciona todas por padrão
-        const allNames = turbines.map(t => t.turbine)
+        const allNames = list.map(t => t.turbine)
         setSelectedTurbines(allNames)
       }
     } catch (e) {
