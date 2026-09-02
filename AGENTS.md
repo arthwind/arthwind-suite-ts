@@ -10,14 +10,20 @@ This is the **single source of truth**; `CLAUDE.md` just imports it.
 ## 🔴 Golden rules (Arthwind / Arthnex standard)
 
 1. **Package manager: `pnpm` only.** Never `npm` / `yarn`. Never commit `package-lock.json` (`pnpm-lock.yaml` is the truth).
-2. **Protected branches: `main`, `homolog`, `development`.** Never commit or push to them directly without explicit permission. Always create a work branch `feat/<id>`, `fix/<id>` or `refactor/<id>` **from `development`**.
+2. **Protected branches & PR-only workflow (`main`, `homolog`, `development`):**
+   - NEVER commit or push directly to `main` or `development`.
+   - Always create a work branch (`feat/<id>`, `fix/<id>`, `refactor/<id>`) branching **from `development`**.
+   - Every change MUST be submitted via **Pull Request (PR)** with mandatory peer review and approval before merging into `development`.
+   - `main` is reserved exclusively for production releases after thorough testing in `development`.
 3. **Before finishing any task, make these green:**
    - `pnpm exec tsc --noEmit -p tsconfig.node.json --composite false && pnpm exec tsc --noEmit -p tsconfig.web.json --composite false`
    - `pnpm exec biome check .`
    - `pnpm exec vitest run`
 4. **No new dependencies without prior approval.** Reuse what already exists.
 5. **Write unit tests for every new piece of logic / processing algorithm.**
-6. **Everything in the code is in English** — messages, errors, comments, function/variable names, types.
+6. **English only:**
+   - All **commit messages** MUST be in English following Conventional Commits (`feat: ...`, `fix: ...`, `refactor: ...`, `docs: ...`, `chore: ...`, `test: ...`).
+   - All PR titles, descriptions, code, messages, errors, comments, function/variable names, and types MUST be in English.
 7. **Senior-level code, minimal comments.** The code explains itself; comment only the non-obvious "why".
 8. **Before creating anything new, search for an existing one** (component, hook, service, util) and reuse/extend it without breaking its current contract.
 9. **Resource management & Lifecycle:** Always clean up event listeners, timers, file streams, child processes, Playwright browser instances, and Three.js scenes/geometries on unmount or process exit.
