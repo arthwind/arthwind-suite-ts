@@ -73,6 +73,22 @@ export interface ArthnexDefect {
   sub_component?: string
 }
 
+export interface ArthnexGalleryPicture {
+  id: number
+  windblade_id: number
+  pixel_size_mm?: string | null
+  width?: number | null
+  height?: number | null
+  workorder_id: string
+  thumbnail?: boolean | null
+  gallery_location?: string | null
+  gallery_location_default?: string | null
+  picture_order?: number | null
+  region?: number
+  image_url: string
+  created_at?: string | null
+}
+
 const DEFAULT_ENDPOINTS: Record<
   ArthnexEnv,
   { backend: string; scheduler: string }
@@ -654,6 +670,34 @@ export class ArthnexApiService {
       sub_component: d.component_name || d.sub_component || '',
       layer: d.layer?.layer || '',
     }))
+  }
+
+  /**
+   * Busca todas as fotos da galeria de inspeção de uma pá
+   */
+  public async getPicturesByBlade(
+    woId: string,
+    windbladeId: number
+  ): Promise<ArthnexGalleryPicture[]> {
+    const baseUrl = this.getBackendBaseUrl()
+    const url = `${baseUrl}upload/pictures?woId=${woId}&windbladeId=${windbladeId}`
+    let headers = await this.getAuthHeadersAsync()
+    let resp = await fetch(url, { headers })
+
+    if (resp.status === 401) {
+      const refreshed = await this.refreshAccessToken()
+      if (refreshed) {
+        headers = await this.getAuthHeadersAsync()
+        resp = await fetch(url, { headers })
+      }
+    }
+
+    if (!resp.ok) {
+      return []
+    }
+
+    const json = await resp.json()
+    return (json.pictures || []) as ArthnexGalleryPicture[]
   }
 
   /**

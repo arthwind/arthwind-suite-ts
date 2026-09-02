@@ -355,6 +355,89 @@ function toDamageCsv(data: any[]): string {
   return csvLines.join('\r\n')
 }
 
+export function partitionDetailsRows(
+  detailsRows: any[],
+  idColumnName: string,
+  zip: JSZip,
+  maxPhotosPerChunk = 4500,
+  maxTurbinesPerChunk = 20
+): void {
+  if (!detailsRows || detailsRows.length === 0) return
+
+  const rowsByTurbine: Record<string, any[]> = {}
+  const uniqueTurbinesInDetails: string[] = []
+
+  detailsRows.forEach(row => {
+    const turbId = String(row[idColumnName] || row.ID || '').trim()
+    if (!rowsByTurbine[turbId]) {
+      rowsByTurbine[turbId] = []
+      uniqueTurbinesInDetails.push(turbId)
+    }
+    rowsByTurbine[turbId].push(row)
+  })
+
+  interface DetailChunk {
+    loteNum: number
+    turbines: string[]
+    startIdx: number
+    endIdx: number
+    rows: any[]
+  }
+
+  const chunks: DetailChunk[] = []
+  let currentChunkRows: any[] = []
+  let currentChunkTurbines: string[] = []
+  let startTurbineIdx = 1
+
+  uniqueTurbinesInDetails.forEach(turbId => {
+    const turbRows = rowsByTurbine[turbId] || []
+    const photoCount = turbRows.length
+
+    if (
+      currentChunkTurbines.length > 0 &&
+      (currentChunkRows.length + photoCount > maxPhotosPerChunk ||
+        currentChunkTurbines.length >= maxTurbinesPerChunk)
+    ) {
+      const loteNum = chunks.length + 1
+      const endTurbineIdx = startTurbineIdx + currentChunkTurbines.length - 1
+      chunks.push({
+        loteNum,
+        turbines: [...currentChunkTurbines],
+        startIdx: startTurbineIdx,
+        endIdx: endTurbineIdx,
+        rows: currentChunkRows,
+      })
+
+      startTurbineIdx = endTurbineIdx + 1
+      currentChunkRows = []
+      currentChunkTurbines = []
+    }
+
+    currentChunkTurbines.push(turbId)
+    currentChunkRows.push(...turbRows)
+  })
+
+  if (currentChunkTurbines.length > 0) {
+    const loteNum = chunks.length + 1
+    const endTurbineIdx = startTurbineIdx + currentChunkTurbines.length - 1
+    chunks.push({
+      loteNum,
+      turbines: [...currentChunkTurbines],
+      startIdx: startTurbineIdx,
+      endIdx: endTurbineIdx,
+      rows: currentChunkRows,
+    })
+  }
+
+  // Grava exclusivamente dentro da pasta Details/ sem redundância
+  chunks.forEach(chunk => {
+    const startStr = String(chunk.startIdx).padStart(2, '0')
+    const endStr = String(chunk.endIdx).padStart(2, '0')
+    const loteFilename = `Details/details_lote_${chunk.loteNum}_turbinas_${startStr}_a_${endStr}.csv`
+    zip.file(loteFilename, toCsv(chunk.rows, ';'))
+  })
+}
+
 interface MappingEntry {
   Component: string
   Material: string
@@ -1650,37 +1733,7 @@ export async function horizonGerarPacote(
       }
 
       dfDetailsFinal = dfD
-      zip.file('details_final.csv', toCsv(dfD, ';'))
-      zip.file('Details/details_final.csv', toCsv(dfD, ';'))
-
-      // Divisão do Details em lotes de até 20 aerogeradores (turbinas)
-      const rowsByTurbine: Record<string, any[]> = {}
-      const uniqueTurbinesInDetails: string[] = []
-
-      dfD.forEach(row => {
-        const turbId = String(row[idc] || '').trim()
-        if (!rowsByTurbine[turbId]) {
-          rowsByTurbine[turbId] = []
-          uniqueTurbinesInDetails.push(turbId)
-        }
-        rowsByTurbine[turbId].push(row)
-      })
-
-      const CHUNK_SIZE = 20
-      for (let i = 0; i < uniqueTurbinesInDetails.length; i += CHUNK_SIZE) {
-        const chunkTurbines = uniqueTurbinesInDetails.slice(i, i + CHUNK_SIZE)
-        const chunkRows: any[] = []
-        chunkTurbines.forEach(t => {
-          chunkRows.push(...rowsByTurbine[t])
-        })
-        const loteNum = Math.floor(i / CHUNK_SIZE) + 1
-        const startNum = String(i + 1).padStart(2, '0')
-        const endNum = String(
-          Math.min(i + CHUNK_SIZE, uniqueTurbinesInDetails.length)
-        ).padStart(2, '0')
-        const loteFilename = `Details/details_lote_${loteNum}_turbinas_${startNum}_a_${endNum}.csv`
-        zip.file(loteFilename, toCsv(chunkRows, ';'))
-      }
+      partitionDetailsRows(dfD, idc, zip, 4500, 20)
 
       if (nRadCorrigidos > 0) {
         errosPos.push(
@@ -2300,10 +2353,43 @@ export async function horizonProcessarFromArthnex(
         'Inspection Type': inspectionType,
       })
 
-      // Buscar defeitos de todas as pás da turbina
+      // Buscar fotos da galeria e defeitos de todas as pás da turbina
       const turbineDefects: any[] = []
       for (const blade of item.windblades || []) {
         try {
+          // 4.1 Buscar TODAS as fotos de inspeção da galeria desta pá
+          const pictures = await arthnexApi.getPicturesByBlade(
+            workorderId,
+            blade.windblade_id
+          )
+
+          if (pictures && pictures.length > 0) {
+            for (const pic of pictures) {
+              const cleanName =
+                path.basename(pic.image_url || '') || `photo_${pic.id}.jpg`
+              const rawLoc = Number(pic.gallery_location || 0)
+              const radDist = (rawLoc > 200 ? rawLoc / 1000 : rawLoc).toFixed(2)
+              const fullUrl = pic.image_url.startsWith('http')
+                ? pic.image_url
+                : `https://blob.arthnex.com/${
+                    pic.image_url.startsWith('galleries/')
+                      ? pic.image_url
+                      : `galleries/${pic.image_url}`
+                  }`
+
+              detailsRows.push({
+                ID: turbName,
+                'Horizon Task ID': matchedTask,
+                Blade: blade.blade || `Blade ${blade.blade_letter}`,
+                'Blade Side': blade.blade_letter || 'A',
+                'Radial Distance': radDist,
+                'File Name': cleanName,
+                URL: fullUrl,
+              })
+            }
+          }
+
+          // 4.2 Buscar defeitos auditados desta pá
           const defects = await arthnexApi.getDefectsByBlade({
             workorderId,
             windfarmId: item.windfarm_id || resolvedWindfarmId || 0,
@@ -2328,20 +2414,22 @@ export async function horizonProcessarFromArthnex(
               'Blade Side': blade.blade_letter || blade.blade || 'A',
             })
 
-            // Details entry para cada foto com apontamento
-            detailsRows.push({
-              ID: turbName,
-              'Horizon Task ID': matchedTask,
-              Blade: blade.blade || `Blade ${blade.blade_letter}`,
-              'Blade Side': blade.blade_letter || 'A',
-              'Radial Distance': String(d.location || '0'),
-              'File Name': photoName,
-              URL: d.image_url || '',
-            })
+            // Fallback: se por algum motivo a galeria não veio, garante que a foto do dano esteja no Details
+            if (!pictures || pictures.length === 0) {
+              detailsRows.push({
+                ID: turbName,
+                'Horizon Task ID': matchedTask,
+                Blade: blade.blade || `Blade ${blade.blade_letter}`,
+                'Blade Side': blade.blade_letter || 'A',
+                'Radial Distance': String(d.location || '0'),
+                'File Name': photoName,
+                URL: d.image_url || '',
+              })
+            }
           }
         } catch (e: any) {
           warnings.push(
-            `Erro ao consultar defeitos da pá ${blade.blade} (${turbName}): ${e.message}`
+            `Erro ao consultar dados da pá ${blade.blade} (${turbName}): ${e.message}`
           )
         }
       }
@@ -2369,39 +2457,9 @@ export async function horizonProcessarFromArthnex(
     // 5. Adicionar Summary ao ZIP
     zip.file('summary_final.csv', toCsv(summaryRows, ','))
 
-    // 6. Adicionar Details e particionar em lotes de 20 turbinas
+    // 6. Adicionar Details particionado (máx 4500 fotos por lote, sem cortar turbinas)
     if (detailsRows.length > 0) {
-      zip.file('details_final.csv', toCsv(detailsRows, ';'))
-      zip.file('Details/details_final.csv', toCsv(detailsRows, ';'))
-
-      // Particionamento em lotes de 20 turbinas
-      const rowsByTurbine: Record<string, any[]> = {}
-      const uniqueTurbinesInDetails: string[] = []
-
-      detailsRows.forEach(row => {
-        const turbId = String(row.ID || '').trim()
-        if (!rowsByTurbine[turbId]) {
-          rowsByTurbine[turbId] = []
-          uniqueTurbinesInDetails.push(turbId)
-        }
-        rowsByTurbine[turbId].push(row)
-      })
-
-      const CHUNK_SIZE = 20
-      for (let i = 0; i < uniqueTurbinesInDetails.length; i += CHUNK_SIZE) {
-        const chunkTurbines = uniqueTurbinesInDetails.slice(i, i + CHUNK_SIZE)
-        const chunkRows: any[] = []
-        chunkTurbines.forEach(t => {
-          chunkRows.push(...rowsByTurbine[t])
-        })
-        const loteNum = Math.floor(i / CHUNK_SIZE) + 1
-        const startNum = String(i + 1).padStart(2, '0')
-        const endNum = String(
-          Math.min(i + CHUNK_SIZE, uniqueTurbinesInDetails.length)
-        ).padStart(2, '0')
-        const loteFilename = `Details/details_lote_${loteNum}_turbinas_${startNum}_a_${endNum}.csv`
-        zip.file(loteFilename, toCsv(chunkRows, ';'))
-      }
+      partitionDetailsRows(detailsRows, 'ID', zip, 4500, 20)
     }
 
     // 7. Adicionar alertas de conversão se existirem

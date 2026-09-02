@@ -86,6 +86,17 @@ describe('horizon service', () => {
       leader: 'ALLAN THIAGO',
       technicians: ['Test Tech'],
     })
+    vi.spyOn(arthnexApi, 'getPicturesByBlade').mockResolvedValue([
+      {
+        id: 501,
+        windblade_id: 11,
+        workorder_id: 'WO-TEST-4682',
+        gallery_location: '45200',
+        picture_order: 1,
+        region: 1,
+        image_url: 'galleries/HIW_001_A_45.jpg',
+      } as any,
+    ])
     vi.spyOn(arthnexApi, 'getDefectsByBlade').mockResolvedValue([
       {
         id: 991,
@@ -147,5 +158,39 @@ describe('horizon service', () => {
     if (fs.existsSync(tmpZipPath)) {
       fs.unlinkSync(tmpZipPath)
     }
+  })
+
+  it('partitionDetailsRows should split chunks at photo limits without splitting turbines', async () => {
+    const JSZip = (await import('jszip')).default
+    const { partitionDetailsRows } = await import('./horizon')
+
+    const zip = new JSZip()
+    // Create 3 turbines with 2000 photos each (total 6000 photos)
+    const rows: any[] = []
+    for (let t = 1; t <= 3; t++) {
+      const tName = `HIW_00${t}`
+      for (let p = 1; p <= 2000; p++) {
+        rows.push({
+          ID: tName,
+          'Horizon Task ID': `task-${t}`,
+          Blade: 'Blade A',
+          'Blade Side': 'A',
+          'Radial Distance': `${p}`,
+          'File Name': `photo_${t}_${p}.jpg`,
+          URL: `https://blob.arthnex.com/${t}_${p}.jpg`,
+        })
+      }
+    }
+
+    // Limit to 3500 photos per chunk
+    partitionDetailsRows(rows, 'ID', zip, 3500, 20)
+
+    const csvFiles = Object.keys(zip.files).filter(f => f.endsWith('.csv'))
+    expect(csvFiles.length).toBe(3)
+    expect(csvFiles[0]).toContain('Details/details_lote_1_turbinas_')
+    expect(csvFiles[1]).toContain('Details/details_lote_2_turbinas_')
+    expect(csvFiles[2]).toContain('Details/details_lote_3_turbinas_')
+    // Ensure no files were placed in root
+    expect(csvFiles.some(f => !f.startsWith('Details/'))).toBe(false)
   })
 })
