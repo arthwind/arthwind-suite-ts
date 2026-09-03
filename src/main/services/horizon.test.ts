@@ -112,6 +112,9 @@ describe('horizon service', () => {
         date: '2026-08-20',
       } as any,
     ])
+    vi.spyOn(arthnexApi, 'getCollectDate').mockResolvedValue(
+      '2026-08-20T00:00:00.000Z'
+    )
 
     // Select exactly 10 specific turbines
     const selectedTen = [

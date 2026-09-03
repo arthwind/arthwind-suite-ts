@@ -703,6 +703,36 @@ export class ArthnexApiService {
   }
 
   /**
+   * Busca a data real de coleta de fotos no campo (colletion_date_photos_turbine)
+   */
+  public async getCollectDate(
+    turbineId: number | string,
+    woId: string,
+    windbladeId: number | string
+  ): Promise<string | null> {
+    const baseUrl = this.getBackendBaseUrl()
+    const url = `${baseUrl}upload/collect-date/${turbineId}/${woId}/${windbladeId}`
+    let headers = await this.getAuthHeadersAsync()
+    let resp = await fetch(url, { headers })
+
+    if (resp.status === 401) {
+      const refreshed = await this.refreshAccessToken()
+      if (refreshed) {
+        headers = await this.getAuthHeadersAsync()
+        resp = await fetch(url, { headers })
+      }
+    }
+
+    if (!resp.ok) return null
+    try {
+      const json = await resp.json()
+      return json?.date_photo || null
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Lista eventos de operações / diárias com suporte a busca por turbina ou workorder
    */
   public async getOperationEvents(

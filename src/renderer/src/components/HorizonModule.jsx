@@ -240,6 +240,8 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
   // Seleção de Turbinas e Shift+Click
   const [selectedTurbines, setSelectedTurbines] = useState([])
   const [lastClickedIndex, setLastClickedIndex] = useState(null)
+  const [turbineSearch, setTurbineSearch] = useState('')
+  const [manualTaskOverrides, setManualTaskOverrides] = useState({})
 
   // Configurações do Pacote
   const [siteName, setSiteName] = useState('')
@@ -307,36 +309,73 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
   }, [loadWorkorders])
 
   // ─── Carregar Turbinas da Workorder Selecionada ────────────────────────────
-  const handleSelectWorkorder = async woId => {
-    setSelectedWo(woId)
-    setWoTurbines([])
-    setSelectedTurbines([])
-    setCloudResult(null)
-    if (!woId || !invoker) return
+  const handleSelectWorkorder = useCallback(
+    async woId => {
+      setSelectedWo(woId)
+      setWoTurbines([])
+      setSelectedTurbines([])
+      setCloudResult(null)
+      if (!woId || !invoker) return
 
-    const woObj = workorders.find(
-      w => w.workorders_id === woId || w.id === woId
-    )
-    if (woObj) {
-      setSiteName(woObj.windfarm_local || woObj.description || 'Wind Farm')
-    }
-
-    setLoadingTurbines(true)
-    try {
-      const res = await invoker.arthnex_get_turbines_blades?.(woId)
-      const list = res?.data || res?.turbines || (Array.isArray(res) ? res : [])
-      if (Array.isArray(list) && list.length > 0) {
-        setWoTurbines(list)
-        // Seleciona todas por padrão
-        const allNames = list.map(t => t.turbine)
-        setSelectedTurbines(allNames)
+      const woObj = workorders.find(
+        w => w.workorders_id === woId || w.id === woId
+      )
+      if (woObj) {
+        setSiteName(woObj.windfarm_local || woObj.description || 'Wind Farm')
+        const desc =
+          woObj.description || woObj.workorder_description || woObj.id
+        const local = woObj.windfarm_local || woObj.client_name || ''
+        setWoSearch(
+          `${desc}${local ? ` — ${local}` : ''} (${woObj.workorders_id || woObj.id})`
+        )
       }
-    } catch (e) {
-      console.error('Falha ao carregar turbinas da workorder:', e)
-    } finally {
-      setLoadingTurbines(false)
-    }
-  }
+
+      setLoadingTurbines(true)
+      try {
+        const res = await invoker.arthnex_get_turbines_blades?.(woId)
+        const list =
+          res?.data || res?.turbines || (Array.isArray(res) ? res : [])
+        if (Array.isArray(list) && list.length > 0) {
+          setWoTurbines(list)
+          // Seleciona todas por padrão
+          const allNames = list.map(t => t.turbine)
+          setSelectedTurbines(allNames)
+        }
+      } catch (e) {
+        console.error('Falha ao carregar turbinas da workorder:', e)
+      } finally {
+        setLoadingTurbines(false)
+      }
+    },
+    [invoker, workorders]
+  )
+
+  const onTypeWorkorder = useCallback(
+    text => {
+      setWoSearch(text)
+      const match = workorders.find(w => {
+        const id = String(w.workorders_id || w.id || '')
+        const desc = String(w.description || w.workorder_description || id)
+        const local = String(w.windfarm_local || w.client_name || '')
+        const fullLabel = `${desc}${local ? ` — ${local}` : ''} (${id})`
+        return (
+          fullLabel.toLowerCase() === text.toLowerCase() ||
+          desc.toLowerCase() === text.toLowerCase() ||
+          id.toLowerCase() === text.toLowerCase() ||
+          (w.description && w.description.toLowerCase() === text.toLowerCase())
+        )
+      })
+
+      if (match) {
+        handleSelectWorkorder(match.workorders_id || match.id)
+      } else if (!text) {
+        setSelectedWo('')
+        setWoTurbines([])
+        setSelectedTurbines([])
+      }
+    },
+    [workorders, handleSelectWorkorder]
+  )
 
   // ─── Carregar Planilha de Task IDs (.xlsx ou .csv) ─────────────────────────
   const handlePickTaskFile = async () => {
@@ -439,13 +478,75 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
     }
   }
 
+  // ─── Resolução Inteligente de Match (Direto, Fuzzy, Numérico e Manual) ────
+  const getTurbineMatch = useCallback(
+    turbName => {
+      // 1. Override manual do usuário
+      if (manualTaskOverrides[turbName] !== undefined) {
+        const sheetKey = manualTaskOverrides[turbName]
+        if (!sheetKey || sheetKey === '__NONE__') {
+          return {
+            matchedSheetTurbine: '',
+            taskId: '',
+            matchType: 'manual_none',
+          }
+        }
+        return {
+          matchedSheetTurbine: sheetKey,
+          taskId: taskMap[sheetKey] || '',
+          matchType: 'manual',
+        }
+      }
+
+      // 2. Match Direto Exato
+      if (taskMap[turbName]) {
+        return {
+          matchedSheetTurbine: turbName,
+          taskId: taskMap[turbName],
+          matchType: 'direct',
+        }
+      }
+
+      // 3. Match Fuzzy por normalização (remove -, _, espaços, minúsculas)
+      const normT = normalizar(turbName)
+      const sheetKeys = Object.keys(taskMap)
+      const fuzzyKey = sheetKeys.find(k => normalizar(k) === normT)
+      if (fuzzyKey) {
+        return {
+          matchedSheetTurbine: fuzzyKey,
+          taskId: taskMap[fuzzyKey],
+          matchType: 'fuzzy',
+        }
+      }
+
+      // 4. Match Numérico / Dígitos (ex: "HIW_008" vs "WTG-08" ou "8")
+      const digitsT = turbName.replace(/\D/g, '').replace(/^0+/, '')
+      if (digitsT) {
+        const digitKey = sheetKeys.find(k => {
+          const d = k.replace(/\D/g, '').replace(/^0+/, '')
+          return d && d === digitsT
+        })
+        if (digitKey) {
+          return {
+            matchedSheetTurbine: digitKey,
+            taskId: taskMap[digitKey],
+            matchType: 'fuzzy',
+          }
+        }
+      }
+
+      return {
+        matchedSheetTurbine: '',
+        taskId: '',
+        matchType: 'none',
+      }
+    },
+    [taskMap, manualTaskOverrides]
+  )
+
   const selectMatchedOnly = () => {
-    const taskMapNorm = {}
-    Object.entries(taskMap).forEach(([k, v]) => {
-      taskMapNorm[normalizar(k)] = v
-    })
     const matched = woTurbines
-      .filter(t => taskMap[t.turbine] || taskMapNorm[normalizar(t.turbine)])
+      .filter(t => Boolean(getTurbineMatch(t.turbine).taskId))
       .map(t => t.turbine)
     setSelectedTurbines(matched)
   }
@@ -456,6 +557,10 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
 
   const deselectAll = () => {
     setSelectedTurbines([])
+  }
+
+  const resetAllManualMatches = () => {
+    setManualTaskOverrides({})
   }
 
   // ─── Processamento Direto via Nuvem ───────────────────────────────────────
@@ -470,10 +575,19 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
     setCloudResult(null)
     setCloudLogs([])
 
+    // Compila o taskMap efetivo considerando os matches automáticos e manuais
+    const effectiveTaskMap = {}
+    woTurbines.forEach(t => {
+      const match = getTurbineMatch(t.turbine)
+      if (match.taskId) {
+        effectiveTaskMap[t.turbine] = match.taskId
+      }
+    })
+
     try {
       const res = await invoker.horizon_process_from_arthnex?.({
         workorderId: selectedWo,
-        taskMap,
+        taskMap: effectiveTaskMap,
         selectedTurbines,
         siteName,
         inspectionType,
@@ -800,37 +914,67 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
             }
             badgeColor={selectedWo ? D.success : D.textMuted}
           >
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <select
-                  value={selectedWo}
-                  onChange={e => handleSelectWorkorder(e.target.value)}
+            <div
+              style={{
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input
+                  list="horizon-wo-options"
+                  value={woSearch}
+                  disabled={loadingWos}
+                  placeholder={
+                    loadingWos
+                      ? 'Carregando workorders...'
+                      : '🔍 Digite para buscar e selecionar por código, parque ou cliente...'
+                  }
+                  onChange={e => onTypeWorkorder(e.target.value)}
                   style={{
                     width: '100%',
                     padding: '8px 12px',
                     borderRadius: '6px',
                     background: D.inputBg,
-                    border: `1px solid ${D.borderLight}`,
+                    border: `1px solid ${selectedWo ? D.accent : D.borderLight}`,
                     color: D.textPrimary,
                     fontSize: '12.5px',
                   }}
-                >
-                  <option value="">
-                    -- Selecione a Workorder no Arthnex --
-                  </option>
+                />
+                <datalist id="horizon-wo-options">
                   {workorders.map(wo => {
                     const id = wo.workorders_id || wo.id
                     const desc =
                       wo.description || wo.workorder_description || id
                     const local = wo.windfarm_local || wo.client_name || ''
-                    return (
-                      <option key={id} value={id}>
-                        {desc} {local ? `— ${local}` : ''} ({id})
-                      </option>
-                    )
+                    const fullLabel = `${desc}${local ? ` — ${local}` : ''} (${id})`
+                    return <option key={id} value={fullLabel} />
                   })}
-                </select>
+                </datalist>
               </div>
+
+              {woSearch && (
+                <button
+                  onClick={() => {
+                    setWoSearch('')
+                    setSelectedWo('')
+                    setWoTurbines([])
+                    setSelectedTurbines([])
+                  }}
+                  title="Limpar seleção"
+                  style={{
+                    background: 'transparent',
+                    border: 0,
+                    color: D.textMuted,
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    padding: '4px 8px',
+                  }}
+                >
+                  ✕ Limpar
+                </button>
+              )}
 
               <button
                 onClick={loadWorkorders}
@@ -839,11 +983,28 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
                   ...btn(D.border, D.bgDeep),
                   color: D.textSecond,
                   padding: '7px 12px',
+                  fontSize: '11.5px',
                 }}
               >
                 {loadingWos ? 'Carregando...' : '🔄 Atualizar'}
               </button>
             </div>
+
+            {selectedWo && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  fontSize: '12px',
+                  color: D.success,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                ✓ <strong>O.S. Conectada:</strong> {selectedWo}{' '}
+                {siteName ? `— Parque: ${siteName}` : ''}
+              </div>
+            )}
 
             {loadingTurbines && (
               <div
@@ -949,197 +1110,422 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
             )}
           </Section>
 
-          {/* ── 3. Auditoria e Seleção Específica de Turbinas ── */}
+          {/* ── 3. Auditoria, Vínculo Lado a Lado ("De / Para") e Seleção de Turbinas ── */}
           {woTurbines.length > 0 && (
             <Section
               num="3"
-              title="Auditoria e Seleção de Turbinas para o Pacote"
+              title="Auditoria e Mapeamento de Turbinas (Arthnex ↔ Horizon)"
               D={D}
               badge={`📊 ${selectedTurbines.length} de ${woTurbines.length} selecionadas`}
               badgeColor={selectedTurbines.length > 0 ? D.success : D.textMuted}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '8px',
-                  marginBottom: '12px',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <button
-                  onClick={selectMatchedOnly}
-                  style={{
-                    ...btn(D.accent, D.accentSoft),
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                  }}
-                >
-                  🎯 Apenas com Task ID (
-                  {
-                    woTurbines.filter(
-                      t =>
-                        taskMap[t.turbine] || taskMapNorm[normalizar(t.turbine)]
-                    ).length
-                  }
+              {(() => {
+                const sheetTurbines = Object.keys(taskMap).sort()
+                const filteredWoTurbines = woTurbines.filter(t => {
+                  if (!turbineSearch) return true
+                  const q = turbineSearch.toLowerCase()
+                  const match = getTurbineMatch(t.turbine)
+                  return (
+                    t.turbine.toLowerCase().includes(q) ||
+                    match.matchedSheetTurbine.toLowerCase().includes(q) ||
+                    match.taskId.toLowerCase().includes(q)
                   )
-                </button>
-                <button
-                  onClick={selectAll}
-                  style={{
-                    ...btn(D.border, D.bgDeep),
-                    color: D.textPrimary,
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                  }}
-                >
-                  ✅ Todas ({woTurbines.length})
-                </button>
-                <button
-                  onClick={deselectAll}
-                  style={{
-                    ...btn(D.border, D.bgDeep),
-                    color: D.textPrimary,
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                  }}
-                >
-                  ❌ Nenhuma
-                </button>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    color: D.textMuted,
-                    marginLeft: 'auto',
-                  }}
-                >
-                  💡 Dica: Segure <strong>Shift + Clique</strong> para
-                  selecionar múltiplas turbinas em lote.
-                </span>
-              </div>
+                })
 
-              {/* Grid de Turbinas */}
-              <div
-                style={{
-                  maxHeight: '280px',
-                  overflowY: 'auto',
-                  border: `1px solid ${D.borderLight}`,
-                  borderRadius: '6px',
-                }}
-              >
-                <table
-                  style={{
-                    width: '100%',
-                    borderCollapse: 'collapse',
-                    fontSize: '12px',
-                  }}
-                >
-                  <thead>
-                    <tr
+                const numManualOverrides =
+                  Object.keys(manualTaskOverrides).length
+
+                return (
+                  <div>
+                    {/* Barra de Ações Rápidas e Busca */}
+                    <div
                       style={{
-                        background: D.bgDeep,
-                        borderBottom: `1px solid ${D.borderLight}`,
-                        color: D.textSecond,
-                        textAlign: 'left',
+                        display: 'flex',
+                        gap: '8px',
+                        marginBottom: '12px',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
                       }}
                     >
-                      <th style={{ padding: '8px 10px', width: '36px' }}>#</th>
-                      <th style={{ padding: '8px 10px' }}>Turbina (Arthnex)</th>
-                      <th style={{ padding: '8px 10px' }}>Horizon Task ID</th>
-                      <th style={{ padding: '8px 10px' }}>Pás</th>
-                      <th style={{ padding: '8px 10px' }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {woTurbines.map((t, idx) => {
-                      const isSelected = selectedTurbines.includes(t.turbine)
-                      const matchedTask =
-                        taskMap[t.turbine] ||
-                        taskMapNorm[normalizar(t.turbine)] ||
-                        ''
-                      const hasMatch = Boolean(matchedTask)
+                      <input
+                        type="text"
+                        placeholder="🔍 Filtrar turbinas na tabela (ex: 08, HIW, etc.)..."
+                        value={turbineSearch}
+                        onChange={e => setTurbineSearch(e.target.value)}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '5px',
+                          background: D.inputBg,
+                          border: `1px solid ${D.borderLight}`,
+                          color: D.textPrimary,
+                          fontSize: '11.5px',
+                          minWidth: '220px',
+                        }}
+                      />
 
-                      return (
-                        <tr
-                          key={t.turbine || idx}
-                          onClick={e => handleTurbineCheck(t.turbine, idx, e)}
+                      <button
+                        onClick={selectMatchedOnly}
+                        style={{
+                          ...btn(D.accent, D.accentSoft),
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        🎯 Apenas com Task ID (
+                        {
+                          woTurbines.filter(t =>
+                            Boolean(getTurbineMatch(t.turbine).taskId)
+                          ).length
+                        }
+                        )
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const visNames = filteredWoTurbines.map(
+                            t => t.turbine
+                          )
+                          setSelectedTurbines(prev => {
+                            const n = new Set(prev)
+                            visNames.forEach(name => n.add(name))
+                            return Array.from(n)
+                          })
+                        }}
+                        style={{
+                          ...btn(D.border, D.bgDeep),
+                          color: D.textPrimary,
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        ✅ Selecionar Visíveis ({filteredWoTurbines.length})
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const visSet = new Set(
+                            filteredWoTurbines.map(t => t.turbine)
+                          )
+                          setSelectedTurbines(prev =>
+                            prev.filter(name => !visSet.has(name))
+                          )
+                        }}
+                        style={{
+                          ...btn(D.border, D.bgDeep),
+                          color: D.textPrimary,
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        ❌ Desmarcar Visíveis
+                      </button>
+
+                      {numManualOverrides > 0 && (
+                        <button
+                          onClick={resetAllManualMatches}
                           style={{
-                            cursor: 'pointer',
-                            background: isSelected
-                              ? `${D.accent}12`
-                              : idx % 2 === 0
-                                ? 'transparent'
-                                : `${D.bgDeep}40`,
-                            borderBottom: `1px solid ${D.borderLight}40`,
+                            ...btn(D.warning, `${D.warning}22`),
+                            color: D.warning,
+                            padding: '4px 10px',
+                            fontSize: '11px',
                           }}
                         >
-                          <td style={{ padding: '6px 10px' }}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => {}} // tratado no onClick do tr
-                              style={{ cursor: 'pointer' }}
-                            />
-                          </td>
-                          <td
+                          ↺ Resetar Matches Manuais ({numManualOverrides})
+                        </button>
+                      )}
+
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          color: D.textMuted,
+                          marginLeft: 'auto',
+                        }}
+                      >
+                        💡 Segure <strong>Shift + Clique</strong> para
+                        selecionar intervalos.
+                      </span>
+                    </div>
+
+                    {/* Tabela Lado a Lado "De / Para" */}
+                    <div
+                      style={{
+                        maxHeight: '320px',
+                        overflowY: 'auto',
+                        border: `1px solid ${D.borderLight}`,
+                        borderRadius: '6px',
+                      }}
+                    >
+                      <table
+                        style={{
+                          width: '100%',
+                          borderCollapse: 'collapse',
+                          fontSize: '12px',
+                        }}
+                      >
+                        <thead>
+                          <tr
                             style={{
-                              padding: '6px 10px',
-                              fontWeight: 600,
-                              color: isSelected ? D.accent : D.textPrimary,
+                              background: D.bgDeep,
+                              borderBottom: `1px solid ${D.borderLight}`,
+                              color: D.textSecond,
+                              textAlign: 'left',
                             }}
                           >
-                            {t.turbine}
-                          </td>
-                          <td
-                            style={{
-                              padding: '6px 10px',
-                              color: hasMatch ? D.textPrimary : D.textMuted,
-                              fontFamily: 'monospace',
-                              fontSize: '11px',
-                            }}
-                          >
-                            {matchedTask || '(Não mapeado)'}
-                          </td>
-                          <td
-                            style={{ padding: '6px 10px', color: D.textSecond }}
-                          >
-                            {t.windblades?.length || 3} pás
-                          </td>
-                          <td style={{ padding: '6px 10px' }}>
-                            {hasMatch ? (
-                              <span
+                            <th style={{ padding: '8px 10px', width: '36px' }}>
+                              #
+                            </th>
+                            <th style={{ padding: '8px 10px' }}>
+                              Turbina (Arthnex / O.S.)
+                            </th>
+                            <th style={{ padding: '8px 10px' }}>
+                              Correspondência na Planilha (Horizon)
+                            </th>
+                            <th style={{ padding: '8px 10px' }}>
+                              Horizon Task ID
+                            </th>
+                            <th style={{ padding: '8px 10px' }}>Pás</th>
+                            <th style={{ padding: '8px 10px' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredWoTurbines.map((t, idx) => {
+                            const isSelected = selectedTurbines.includes(
+                              t.turbine
+                            )
+                            const match = getTurbineMatch(t.turbine)
+                            const isManual =
+                              manualTaskOverrides[t.turbine] !== undefined
+
+                            return (
+                              <tr
+                                key={t.turbine || idx}
+                                onClick={e =>
+                                  handleTurbineCheck(t.turbine, idx, e)
+                                }
                                 style={{
-                                  background: `${D.success}22`,
-                                  color: D.success,
-                                  padding: '2px 6px',
-                                  borderRadius: '4px',
-                                  fontSize: '10.5px',
-                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  background: isSelected
+                                    ? `${D.accent}12`
+                                    : idx % 2 === 0
+                                      ? 'transparent'
+                                      : `${D.bgDeep}40`,
+                                  borderBottom: `1px solid ${D.borderLight}40`,
                                 }}
                               >
-                                ✓ Match
-                              </span>
-                            ) : (
-                              <span
-                                style={{
-                                  background: `${D.error}22`,
-                                  color: D.error,
-                                  padding: '2px 6px',
-                                  borderRadius: '4px',
-                                  fontSize: '10.5px',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                ⚠ Sem ID
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                                <td style={{ padding: '6px 10px' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {}} // tratado no onClick do tr
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                </td>
+                                <td
+                                  style={{
+                                    padding: '6px 10px',
+                                    fontWeight: 600,
+                                    color: isSelected
+                                      ? D.accent
+                                      : D.textPrimary,
+                                  }}
+                                >
+                                  {t.turbine}
+                                </td>
+
+                                {/* Seletor / De-Para Lado a Lado */}
+                                <td
+                                  style={{ padding: '6px 10px' }}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  {sheetTurbines.length > 0 ? (
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                      }}
+                                    >
+                                      <select
+                                        value={
+                                          match.matchedSheetTurbine ||
+                                          '__NONE__'
+                                        }
+                                        onChange={e => {
+                                          const val = e.target.value
+                                          setManualTaskOverrides(prev => ({
+                                            ...prev,
+                                            [t.turbine]: val,
+                                          }))
+                                        }}
+                                        style={{
+                                          fontSize: '11.5px',
+                                          padding: '3px 8px',
+                                          borderRadius: '4px',
+                                          background: isManual
+                                            ? `${D.accent}22`
+                                            : D.inputBg,
+                                          border: `1px solid ${
+                                            isManual ? D.accent : D.borderLight
+                                          }`,
+                                          color: isManual
+                                            ? D.accent
+                                            : D.textPrimary,
+                                          fontWeight: isManual ? 600 : 400,
+                                          cursor: 'pointer',
+                                          maxWidth: '220px',
+                                        }}
+                                      >
+                                        <option value="__NONE__">
+                                          -- Sem Vínculo (Não Mapear) --
+                                        </option>
+                                        {sheetTurbines.map(st => (
+                                          <option key={st} value={st}>
+                                            {st}{' '}
+                                            {st === t.turbine
+                                              ? '(Nome Idêntico)'
+                                              : ''}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {isManual && (
+                                        <button
+                                          onClick={() => {
+                                            setManualTaskOverrides(prev => {
+                                              const c = { ...prev }
+                                              delete c[t.turbine]
+                                              return c
+                                            })
+                                          }}
+                                          title="Restaurar para match automático"
+                                          style={{
+                                            background: D.accentSoft,
+                                            border: `1px solid ${D.accent}44`,
+                                            color: D.accent,
+                                            borderRadius: '4px',
+                                            padding: '2px 6px',
+                                            cursor: 'pointer',
+                                            fontSize: '10.5px',
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          ↺ Auto
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        color: D.textMuted,
+                                        fontSize: '11px',
+                                        fontStyle: 'italic',
+                                      }}
+                                    >
+                                      Carregue a planilha no passo 2
+                                    </span>
+                                  )}
+                                </td>
+
+                                <td
+                                  style={{
+                                    padding: '6px 10px',
+                                    color: match.taskId
+                                      ? D.textPrimary
+                                      : D.textMuted,
+                                    fontFamily: 'monospace',
+                                    fontSize: '11px',
+                                  }}
+                                >
+                                  {match.taskId || '(Pendente)'}
+                                </td>
+                                <td
+                                  style={{
+                                    padding: '6px 10px',
+                                    color: D.textSecond,
+                                  }}
+                                >
+                                  {t.windblades?.length || 3} pás
+                                </td>
+                                <td style={{ padding: '6px 10px' }}>
+                                  {match.matchType === 'direct' && (
+                                    <span
+                                      style={{
+                                        background: `${D.success}22`,
+                                        color: D.success,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      ✓ Direto
+                                    </span>
+                                  )}
+                                  {match.matchType === 'fuzzy' && (
+                                    <span
+                                      style={{
+                                        background: `${D.accent}22`,
+                                        color: D.accent,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      ⚡ Automático
+                                    </span>
+                                  )}
+                                  {match.matchType === 'manual' && (
+                                    <span
+                                      style={{
+                                        background: `${D.warning}22`,
+                                        color: D.warning,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      ✏️ Manual
+                                    </span>
+                                  )}
+                                  {match.matchType === 'manual_none' && (
+                                    <span
+                                      style={{
+                                        background: `${D.textMuted}22`,
+                                        color: D.textMuted,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      🚫 Ignorado
+                                    </span>
+                                  )}
+                                  {match.matchType === 'none' && (
+                                    <span
+                                      style={{
+                                        background: `${D.error}22`,
+                                        color: D.error,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10.5px',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      ⚠ Sem ID
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })()}
             </Section>
           )}
 

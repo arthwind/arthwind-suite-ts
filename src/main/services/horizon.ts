@@ -2317,6 +2317,8 @@ export async function horizonProcessarFromArthnex(
     let totalDamages = 0
 
     // 4. Processar cada turbina
+    let campaignDate = ''
+
     for (const item of targetTurbines) {
       const turbName = item.turbine
       const normKey = normalizar(turbName)
@@ -2329,10 +2331,25 @@ export async function horizonProcessarFromArthnex(
 
       // Buscar fotos da galeria e defeitos de todas as pás da turbina
       const turbineDefects: any[] = []
-      let detectedDate = ''
+      let collectDateDetected = ''
+      let picDateDetected = ''
+      let firstDefectDate = ''
 
       for (const blade of item.windblades || []) {
         try {
+          // 4.0 Buscar data real de coleta/voo de fotos (colletion_date_photos_turbine)
+          if (!collectDateDetected) {
+            const cdRaw = await arthnexApi.getCollectDate(
+              item.turbine_id || item.id,
+              workorderId,
+              blade.windblade_id
+            )
+            if (cdRaw) {
+              const parsedCd = formatDateIso(cdRaw)
+              if (parsedCd) collectDateDetected = parsedCd
+            }
+          }
+
           // 4.1 Buscar TODAS as fotos de inspeção da galeria desta pá
           const pictures = await arthnexApi.getPicturesByBlade(
             workorderId,
@@ -2341,9 +2358,9 @@ export async function horizonProcessarFromArthnex(
 
           if (pictures && pictures.length > 0) {
             for (const pic of pictures) {
-              if (!detectedDate && pic.created_at) {
+              if (!picDateDetected && pic.created_at) {
                 const parsed = formatDateIso(pic.created_at)
-                if (parsed) detectedDate = parsed
+                if (parsed) picDateDetected = parsed
               }
 
               const cleanName =
@@ -2379,9 +2396,13 @@ export async function horizonProcessarFromArthnex(
           })
 
           for (const d of defects || []) {
+            let itemDefectDate = ''
             if (d.date) {
               const parsed = formatDateIso(d.date)
-              if (parsed) detectedDate = parsed
+              if (parsed) {
+                itemDefectDate = parsed
+                if (!firstDefectDate) firstDefectDate = parsed
+              }
             }
 
             const photoName = d.image_url
@@ -2389,7 +2410,7 @@ export async function horizonProcessarFromArthnex(
               : `photo_${d.id}.jpg`
             turbineDefects.push({
               'Photo File Name': photoName,
-              Date: '',
+              Date: itemDefectDate,
               Type: d.name,
               Severity: String(d.severity || 1),
               Width: '0',
@@ -2420,8 +2441,10 @@ export async function horizonProcessarFromArthnex(
         }
       }
 
-      // 4.3 Resolver data real de inspeção da turbina
-      let inspectionDate = detectedDate
+      // 4.3 Resolver data real de inspeção da turbina (prioriza coleta de campo)
+      let inspectionDate =
+        collectDateDetected || firstDefectDate || picDateDetected
+
       if (!inspectionDate) {
         try {
           const opData = await arthnexApi.getTechnicianAndDateByTurbine(
@@ -2435,8 +2458,17 @@ export async function horizonProcessarFromArthnex(
           // fallback
         }
       }
+
+      // Se esta turbina não tem data em nenhum registro, usa a data predominante da campanha
+      if (!inspectionDate && campaignDate) {
+        inspectionDate = campaignDate
+      }
+
+      // Fallback final apenas se a O.S. inteira não possuir nenhuma data
       if (!inspectionDate) {
         inspectionDate = formatDateIso(new Date())
+      } else if (!campaignDate) {
+        campaignDate = inspectionDate
       }
 
       const currentSite = siteName || item.workorder_description || 'Wind Farm'
@@ -2453,6 +2485,11 @@ export async function horizonProcessarFromArthnex(
 
       // Se houver danos, converter para SkySpecs taxonomy e gravar no ZIP
       if (turbineDefects.length > 0) {
+        // Preenche data dos defeitos sem data com a data da inspeção
+        turbineDefects.forEach(td => {
+          if (!td.Date) td.Date = inspectionDate
+        })
+
         totalDamages += turbineDefects.length
         const { convertedRows, flags } = convertDamagesDf(
           turbineDefects,
@@ -2464,7 +2501,7 @@ export async function horizonProcessarFromArthnex(
           row['Turbine'] = turbName
           row['Site'] = currentSite
           row['Inspection Date'] = inspectionDate
-          row['Date'] = inspectionDate
+          if (!row['Date']) row['Date'] = inspectionDate
         })
 
         zip.file(`Damages/${turbName}.csv`, toDamageCsv(convertedRows))
