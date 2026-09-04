@@ -71,7 +71,10 @@ export interface ArthnexDefect {
   is_360?: boolean
   repair_action?: string
   sub_component?: string
+  layer?: string
   date?: string
+  width?: number
+  length?: number
 }
 
 export interface ArthnexGalleryPicture {
@@ -671,6 +674,18 @@ export class ArthnexApiService {
       sub_component: d.component_name || d.sub_component || '',
       layer: d.layer?.layer || '',
       date: d.date || '',
+      width:
+        d.width !== undefined && d.width !== null
+          ? Number(d.width)
+          : d.dh_width !== undefined && d.dh_width !== null
+            ? Number(d.dh_width)
+            : Number(d.polygon_width || 0),
+      length:
+        d.length !== undefined && d.length !== null
+          ? Number(d.length)
+          : d.dh_length !== undefined && d.dh_length !== null
+            ? Number(d.dh_length)
+            : Number(d.polygon_height || d.polygon_length || 0),
     }))
   }
 

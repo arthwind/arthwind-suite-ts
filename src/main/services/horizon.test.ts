@@ -164,6 +164,35 @@ describe('horizon service', () => {
     }
   })
 
+  it('horizonProcessarFromArthnex should name zip after windfarm and workorder in task file directory', async () => {
+    const tmpDir = path.join('/tmp', `horizon_dir_${Date.now()}`)
+    fs.mkdirSync(tmpDir, { recursive: true })
+    const fakeTaskFile = path.join(tmpDir, 'Pattern Status.xlsx')
+    fs.writeFileSync(fakeTaskFile, 'dummy')
+
+    const result = await horizonProcessarFromArthnex({
+      workorderId: 'internal-uuid-123',
+      workorderNumber: 'BOT-ATW-2026-0013-1',
+      taskFilePath: fakeTaskFile,
+      taskMap: { HIW_001: 'uuid-1' },
+      selectedTurbines: ['HIW_001'],
+      siteName: 'Henvey Inlet',
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.zipPath).toBe(
+      path.join(tmpDir, 'Horizon_Package_Henvey_Inlet_BOT-ATW-2026-0013-1.zip')
+    )
+    expect(fs.existsSync(result.zipPath!)).toBe(true)
+
+    // Cleanup
+    if (result.zipPath && fs.existsSync(result.zipPath)) {
+      fs.unlinkSync(result.zipPath)
+    }
+    fs.unlinkSync(fakeTaskFile)
+    fs.rmdirSync(tmpDir)
+  })
+
   it('partitionDetailsRows should split chunks at photo limits without splitting turbines', async () => {
     const JSZip = (await import('jszip')).default
     const { partitionDetailsRows } = await import('./horizon')
@@ -177,8 +206,9 @@ describe('horizon service', () => {
         rows.push({
           ID: tName,
           'Horizon Task ID': `task-${t}`,
-          Blade: 'Blade A',
-          'Blade Side': 'A',
+          Blade: 'A',
+          'Blade Side': 'suction_side',
+          'Blade Chamber': 'trailing_edge',
           'Radial Distance': `${p}`,
           'File Name': `photo_${t}_${p}.jpg`,
           URL: `https://blob.arthnex.com/${t}_${p}.jpg`,
@@ -196,5 +226,21 @@ describe('horizon service', () => {
     expect(csvFiles[2]).toContain('Details/details_lote_3_turbinas_')
     // Ensure no files were placed in root
     expect(csvFiles.some(f => !f.startsWith('Details/'))).toBe(false)
+
+    // Verify CSV delimiter and standard SkySpecs Horizon headers
+    const firstChunkContent = await zip.file(csvFiles[0])?.async('string')
+    expect(firstChunkContent).toBeDefined()
+    const lines = (firstChunkContent || '').split('\r\n')
+    expect(lines[0]).toBe(
+      'ID,Horizon Task ID,Blade,Blade Chamber,Blade Side,Direction,Height,Radial Distance,Image URL,Path'
+    )
+    // Delimiter must be comma, not semicolon
+    expect(lines[0].includes(';')).toBe(false)
+    expect(lines[1].includes(';')).toBe(false)
+    // Path and Image URL must be present
+    expect(lines[1]).toContain('photo_1_1.jpg')
+    expect(lines[1]).toContain('https://blob.arthnex.com/1_1.jpg')
+    expect(lines[1]).toContain('trailing_edge')
+    expect(lines[1]).toContain('suction_side')
   })
 })

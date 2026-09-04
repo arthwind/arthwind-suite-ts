@@ -1,6 +1,6 @@
 # Maintainer: Pedro
 pkgname=arthwind-suite-ts-bin
-pkgver=1.6.0
+pkgver=1.25.2
 pkgrel=1
 pkgdesc="Arthwind Suite - Plataforma Integrada de Inspeção Eólica e Automação"
 arch=('x86_64')

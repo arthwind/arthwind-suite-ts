@@ -20,6 +20,56 @@ export const INSPECTION_TYPES_VALIDOS = [
   'Transition Piece',
 ]
 
+export const BLADE_CHAMBER_MAP: Record<number, string> = {
+  1: 'leading_edge',
+  2: 'trailing_edge',
+  3: 'between_web_1',
+  4: 'suction_side',
+  5: 'pressure_side',
+}
+
+export const BLADE_SIDE_DEFECT_MAP: Record<string, string> = {
+  LE: 'Leading Edge',
+  TE: 'Trailing Edge',
+  CE: 'Suction Side',
+  SS: 'Suction Side',
+  PS: 'Pressure Side',
+  'Leading Edge': 'Leading Edge',
+  'Trailing Edge': 'Trailing Edge',
+  'Suction Side': 'Suction Side',
+  'Pressure Side': 'Pressure Side',
+}
+
+export function resolveBladeLetter(blade: any, bladeIndex?: number): string {
+  if (blade) {
+    const rawLetter = String(blade.blade_letter || '')
+      .trim()
+      .toUpperCase()
+    if (['A', 'B', 'C'].includes(rawLetter)) return rawLetter
+
+    const rawBlade = String(blade.blade || blade.Blade || '').trim()
+    if (['A', 'B', 'C'].includes(rawBlade.toUpperCase())) {
+      return rawBlade.toUpperCase()
+    }
+
+    const match =
+      rawBlade.match(/Blade\s*([ABC])/i) ||
+      rawBlade.match(/\b([ABC])\b/i) ||
+      rawLetter.match(/Blade\s*([ABC])/i)
+    if (match) return match[1].toUpperCase()
+
+    if (rawBlade === '1' || rawLetter === '1') return 'A'
+    if (rawBlade === '2' || rawLetter === '2') return 'B'
+    if (rawBlade === '3' || rawLetter === '3') return 'C'
+  }
+
+  if (typeof bladeIndex === 'number' && bladeIndex >= 0 && bladeIndex < 3) {
+    return ['A', 'B', 'C'][bladeIndex]
+  }
+
+  return 'A'
+}
+
 export interface ValidationResult {
   success: boolean
   is_valid: boolean
@@ -333,6 +383,69 @@ function toCsv(data: any[], delimiter = ','): string {
   return csvLines.join('\r\n')
 }
 
+export function formatCoordinatesForHorizon(coordsRaw: any): string {
+  if (!coordsRaw) return ''
+  let str = String(coordsRaw).trim()
+  if (!str || str === '[]' || str === '""') return ''
+
+  str = str.replace(/^"|"$/g, '').replace(/^"|"$/g, '')
+
+  // Se já estiver no formato padrão SkySpecs Horizon [x,y],[x,y],...
+  if (/^(\[\d+,\s*\d+\],?\s*)+$/.test(str)) {
+    return str.replace(/\s+/g, '')
+  }
+
+  // Regex universal para capturar pares x e y em qualquer formato: {x: 123, y: 456}, {"x": 123, "y": 456}, etc.
+  const xyMatches = Array.from(
+    str.matchAll(/x["\s:]+([-\d.]+)[,\s]+y["\s:]+([-\d.]+)/gi)
+  )
+  if (xyMatches.length > 0) {
+    const points = xyMatches.map(m => {
+      const x = Math.abs(Math.round(Number(m[1])))
+      const y = Math.abs(Math.round(Number(m[2])))
+      return `[${x},${y}]`
+    })
+    return points.join(',')
+  }
+
+  try {
+    let parsed = JSON.parse(str)
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 1 && Array.isArray(parsed[0])) {
+        parsed = parsed[0]
+      }
+
+      const points: string[] = []
+      for (const pt of parsed) {
+        if (Array.isArray(pt) && pt.length >= 2) {
+          const x = Math.abs(Math.round(Number(pt[0])))
+          const y = Math.abs(Math.round(Number(pt[1])))
+          points.push(`[${x},${y}]`)
+        } else if (pt && typeof pt === 'object' && ('x' in pt || 'y' in pt)) {
+          const x = Math.abs(Math.round(Number(pt.x || 0)))
+          const y = Math.abs(Math.round(Number(pt.y || 0)))
+          points.push(`[${x},${y}]`)
+        }
+      }
+
+      if (points.length > 0) {
+        return points.join(',')
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  if (str.startsWith('[[') && str.endsWith(']]')) {
+    const inner = str.substring(1, str.length - 1).trim()
+    if (/^(\[\d+,\s*\d+\],?\s*)+$/.test(inner)) {
+      return inner.replace(/\s+/g, '')
+    }
+  }
+
+  return str.replace(/\s+/g, '')
+}
+
 function toDamageCsv(data: any[]): string {
   if (data.length === 0) return ''
   const csvLines = [SKYSPECS_COLUMNS.join(',')]
@@ -343,7 +456,8 @@ function toDamageCsv(data: any[]): string {
         .replace(/^"|"$/g, '')
         .replace(/^'|'$/g, '')
       if (c === 'Coordinates') {
-        return `"${val}"`
+        const formatted = formatCoordinatesForHorizon(val)
+        return `"${formatted}"`
       }
       if (val.includes(',') || val.includes('"') || val.includes('\n')) {
         return `"${val.replace(/"/g, '""')}"`
@@ -434,7 +548,33 @@ export function partitionDetailsRows(
     const startStr = String(chunk.startIdx).padStart(2, '0')
     const endStr = String(chunk.endIdx).padStart(2, '0')
     const loteFilename = `Details/details_lote_${chunk.loteNum}_turbinas_${startStr}_a_${endStr}.csv`
-    zip.file(loteFilename, toCsv(chunk.rows, ';'))
+    const normalizedRows = chunk.rows.map(row => {
+      const idVal = String(row[idColumnName] || row.ID || '').trim()
+      const pathVal = row.Path || row['File Name'] || row.fileName || ''
+      const urlVal = row['Image URL'] || row.URL || row.url || ''
+      const bladeVal = resolveBladeLetter(row)
+      const chamberVal =
+        row['Blade Chamber'] ||
+        row.blade_chamber ||
+        row.chamber ||
+        'trailing_edge'
+      const bladeSideVal = row['Blade Side'] || row.blade_side || 'suction_side'
+      const radVal = row['Radial Distance'] || row.location || '0'
+
+      return {
+        ID: idVal,
+        'Horizon Task ID': row['Horizon Task ID'] || '',
+        Blade: bladeVal,
+        'Blade Chamber': chamberVal,
+        'Blade Side': bladeSideVal,
+        Direction: row.Direction || '',
+        Height: row.Height || '',
+        'Radial Distance': radVal,
+        'Image URL': urlVal,
+        Path: pathVal,
+      }
+    })
+    zip.file(loteFilename, toCsv(normalizedRows, ','))
   })
 }
 
@@ -1000,6 +1140,9 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
       })
     }
 
+    const lengthStr = String(row['Length'] ?? row['Length (m)'] ?? '0')
+    const distanceStr = String(row['Distance'] ?? row['Distance (m)'] ?? '0')
+
     convertedRows.push({
       'Photo File Name': String(row['Photo File Name'] || ''),
       Date: formatDateIso(row['Date'] || row['Inspection Date'] || ''),
@@ -1011,9 +1154,9 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
       'Blade Side': String(row['Blade Side'] || ''),
       Severity: severityFinal,
       'Width (m)': widthStr,
-      'Length (m)': String(row['Length'] || ''),
-      'Distance (m)': String(row['Distance'] || ''),
-      Coordinates: String(row['Coordinates'] || '').replace(/\s+/g, ''),
+      'Length (m)': lengthStr,
+      'Distance (m)': distanceStr,
+      Coordinates: formatCoordinatesForHorizon(row['Coordinates']),
     })
   })
 
@@ -2007,22 +2150,14 @@ export async function horizonCorrigirDamagesDireto(
             .join(',')
             .trim()
             .replace(/^['"]|['"]$/g, '')
-          if (coordsVal.startsWith('[[') && coordsVal.endsWith(']]')) {
-            coordsVal = coordsVal.substring(1, coordsVal.length - 1)
-          }
-          coordsVal = coordsVal.replace(/\s+/g, '')
+          coordsVal = formatCoordinatesForHorizon(coordsVal)
           rowData = [...rowBefore, coordsVal, ...rowAfter]
         } else {
           rowData = parts
             .slice(0, headers.length)
             .map(val => val.trim().replace(/^['"]|['"]$/g, ''))
           if (rowData.length > coordsIdx) {
-            let cVal = rowData[coordsIdx]
-            if (cVal.startsWith('[[') && cVal.endsWith(']]')) {
-              cVal = cVal.substring(1, cVal.length - 1)
-            }
-            cVal = cVal.replace(/\s+/g, '')
-            rowData[coordsIdx] = cVal
+            rowData[coordsIdx] = formatCoordinatesForHorizon(rowData[coordsIdx])
           }
         }
 
@@ -2229,6 +2364,8 @@ export async function extractHorizonTaskIdsFromXlsx(
 
 export interface HorizonArthnexParams {
   workorderId: string
+  workorderNumber?: string
+  taskFilePath?: string
   taskMap: Record<string, string>
   selectedTurbines?: string[]
   siteName?: string
@@ -2250,10 +2387,12 @@ export async function horizonProcessarFromArthnex(
 }> {
   const {
     workorderId,
+    workorderNumber,
+    taskFilePath,
     taskMap,
     selectedTurbines,
     siteName,
-    inspectionType = 'Autonomous Drone',
+    inspectionType = 'Blade Internal',
     outputPath,
     sendLog = () => {},
   } = params
@@ -2335,7 +2474,10 @@ export async function horizonProcessarFromArthnex(
       let picDateDetected = ''
       let firstDefectDate = ''
 
-      for (const blade of item.windblades || []) {
+      const windbladesList = item.windblades || []
+      for (let bIdx = 0; bIdx < windbladesList.length; bIdx++) {
+        const blade = windbladesList[bIdx]
+        const bladeLetter = resolveBladeLetter(blade, bIdx)
         try {
           // 4.0 Buscar data real de coleta/voo de fotos (colletion_date_photos_turbine)
           if (!collectDateDetected) {
@@ -2357,32 +2499,53 @@ export async function horizonProcessarFromArthnex(
           )
 
           if (pictures && pictures.length > 0) {
+            const seenChamberLoc = new Set<string>()
+
             for (const pic of pictures) {
               if (!picDateDetected && pic.created_at) {
                 const parsed = formatDateIso(pic.created_at)
                 if (parsed) picDateDetected = parsed
               }
 
+              let rawUrl = pic.image_url || ''
+              const urlPathOnly = rawUrl.split('?')[0].split('#')[0]
               const cleanName =
-                path.basename(pic.image_url || '') || `photo_${pic.id}.jpg`
+                path.basename(urlPathOnly) || `photo_${pic.id}.jpg`
               const rawLoc = Number(pic.gallery_location || 0)
               const radDist = (rawLoc > 200 ? rawLoc / 1000 : rawLoc).toFixed(2)
-              const fullUrl = pic.image_url.startsWith('http')
-                ? pic.image_url
-                : `https://blob.arthnex.com/${
-                    pic.image_url.startsWith('galleries/')
-                      ? pic.image_url
-                      : `galleries/${pic.image_url}`
-                  }`
+
+              let fullUrl = rawUrl
+              if (fullUrl.startsWith('https://blob.arthnex.com/http')) {
+                fullUrl = fullUrl.replace('https://blob.arthnex.com/', '')
+              } else if (!fullUrl.startsWith('http')) {
+                fullUrl = `https://blob.arthnex.com/${
+                  fullUrl.startsWith('galleries/')
+                    ? fullUrl
+                    : `galleries/${fullUrl}`
+                }`
+              }
+
+              const chamber =
+                BLADE_CHAMBER_MAP[Number(pic.region)] || 'trailing_edge'
+              const sideKey = `${radDist}_${pic.region || 0}_${blade.windblade_id}`
+              let resolvedBladeSide = 'suction_side'
+              if (seenChamberLoc.has(sideKey)) {
+                resolvedBladeSide = 'pressure_side'
+              } else {
+                seenChamberLoc.add(sideKey)
+              }
 
               detailsRows.push({
                 ID: turbName,
                 'Horizon Task ID': matchedTask,
-                Blade: blade.blade || `Blade ${blade.blade_letter}`,
-                'Blade Side': blade.blade_letter || 'A',
+                Blade: bladeLetter,
+                'Blade Chamber': chamber,
+                'Blade Side': resolvedBladeSide,
+                Direction: '',
+                Height: '',
                 'Radial Distance': radDist,
-                'File Name': cleanName,
-                URL: fullUrl,
+                'Image URL': fullUrl,
+                Path: cleanName,
               })
             }
           }
@@ -2405,20 +2568,37 @@ export async function horizonProcessarFromArthnex(
               }
             }
 
-            const photoName = d.image_url
-              ? path.basename(d.image_url)
+            const dUrlPathOnly = String(d.image_url || '')
+              .split('?')[0]
+              .split('#')[0]
+            const photoName = dUrlPathOnly
+              ? path.basename(dUrlPathOnly)
               : `photo_${d.id}.jpg`
+            const defectSide =
+              BLADE_SIDE_DEFECT_MAP[d.section || d.side || ''] ||
+              d.section ||
+              d.side ||
+              'Leading Edge'
+
+            let rawW = Number(d.width || 0)
+            if (rawW > 20) rawW = rawW / 1000
+            const widthStr = rawW > 0 ? String(rawW) : '0'
+
+            let rawL = Number(d.length || 0)
+            if (rawL > 20) rawL = rawL / 1000
+            const lengthStr = rawL > 0 ? String(rawL) : '0'
+
             turbineDefects.push({
               'Photo File Name': photoName,
               Date: itemDefectDate,
               Type: d.name,
               Severity: String(d.severity || 1),
-              Width: '0',
-              Length: '0',
+              Width: widthStr,
+              Length: lengthStr,
               Distance: String(d.location || '0'),
               Coordinates: d.coordinates || '',
               Surface: d.surface || 'External',
-              'Blade Side': blade.blade_letter || blade.blade || 'A',
+              'Blade Side': defectSide,
             })
 
             // Fallback: se por algum motivo a galeria não veio, garante que a foto do dano esteja no Details
@@ -2426,11 +2606,14 @@ export async function horizonProcessarFromArthnex(
               detailsRows.push({
                 ID: turbName,
                 'Horizon Task ID': matchedTask,
-                Blade: blade.blade || `Blade ${blade.blade_letter}`,
-                'Blade Side': blade.blade_letter || 'A',
+                Blade: bladeLetter,
+                'Blade Chamber': 'trailing_edge',
+                'Blade Side': 'suction_side',
+                Direction: '',
+                Height: '',
                 'Radial Distance': String(d.location || '0'),
-                'File Name': photoName,
-                URL: d.image_url || '',
+                'Image URL': d.image_url || '',
+                Path: photoName,
               })
             }
           }
@@ -2473,14 +2656,18 @@ export async function horizonProcessarFromArthnex(
 
       const currentSite = siteName || item.workorder_description || 'Wind Farm'
 
-      // Summary Row com a data real detectada
+      // Summary Row com o padrão oficial de 10 colunas da SkySpecs Horizon
       summaryRows.push({
-        Turbine: turbName,
-        'Horizon Task ID': matchedTask,
-        Site: currentSite,
         ID: turbName,
+        Description: '',
         'Inspection Date': inspectionDate,
+        'Horizon Task ID': matchedTask,
         'Inspection Type': inspectionType,
+        Site: currentSite,
+        Turbine: turbName,
+        'Component Serial Number': '',
+        'Component Type': '',
+        Vendor: '',
       })
 
       // Se houver danos, converter para SkySpecs taxonomy e gravar no ZIP
@@ -2530,14 +2717,47 @@ export async function horizonProcessarFromArthnex(
 
     let finalZipPath = outputPath
     if (!finalZipPath) {
-      const defaultDir =
-        process.platform === 'win32'
-          ? path.join(process.env.USERPROFILE || 'C:\\', 'Downloads')
-          : path.join(process.env.HOME || '/tmp', 'Downloads')
-      finalZipPath = path.join(
-        defaultDir,
-        `Horizon_Package_${workorderId}_${Date.now()}.zip`
-      )
+      let targetDir =
+        taskFilePath && fs.existsSync(path.dirname(taskFilePath))
+          ? path.dirname(taskFilePath)
+          : ''
+
+      if (!targetDir) {
+        targetDir =
+          process.platform === 'win32'
+            ? path.join(process.env.USERPROFILE || 'C:\\', 'Downloads')
+            : path.join(process.env.HOME || '/tmp', 'Downloads')
+      }
+
+      const rawSite = siteName || targetTurbines[0]?.workorder_description || ''
+      const cleanSite = rawSite
+        .replace(/[\\/*?:"<>|]/g, '')
+        .trim()
+        .replace(/\s+/g, '_')
+
+      const rawWo =
+        workorderNumber ||
+        (targetTurbines[0]?.workorder_description &&
+        targetTurbines[0].workorder_description !== rawSite
+          ? targetTurbines[0].workorder_description
+          : '')
+      const cleanWo = rawWo
+        .replace(/[\\/*?:"<>|]/g, '')
+        .trim()
+        .replace(/\s+/g, '_')
+
+      let baseName = 'Horizon_Package'
+      if (cleanSite && cleanWo && cleanSite !== cleanWo) {
+        baseName = `Horizon_Package_${cleanSite}_${cleanWo}`
+      } else if (cleanSite) {
+        baseName = `Horizon_Package_${cleanSite}`
+      } else if (cleanWo) {
+        baseName = `Horizon_Package_${cleanWo}`
+      } else {
+        baseName = `Horizon_Package_${workorderId}`
+      }
+
+      finalZipPath = path.join(targetDir, `${baseName}.zip`)
     }
 
     fs.writeFileSync(finalZipPath, zipBuffer)

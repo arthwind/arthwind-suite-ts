@@ -245,7 +245,7 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
 
   // Configurações do Pacote
   const [siteName, setSiteName] = useState('')
-  const [inspectionType, setInspectionType] = useState('Autonomous Drone')
+  const [inspectionType, setInspectionType] = useState('Blade Internal')
   const [cloudLoading, setCloudLoading] = useState(false)
   const [cloudResult, setCloudResult] = useState(null)
   const [cloudLogs, setCloudLogs] = useState([])
@@ -408,6 +408,13 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
 
           const targetSheetName = matchedSheet.name
           setSelectedSheet(targetSheetName)
+          if (
+            !siteName ||
+            siteName === 'Wind Farm' ||
+            siteName.startsWith('BOT-')
+          ) {
+            setSiteName(targetSheetName)
+          }
 
           // Extrai os Task IDs da aba
           const extRes = await invoker.horizon_extract_task_ids?.(
@@ -434,6 +441,7 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
 
   const handleChangeSheet = async sheetName => {
     setSelectedSheet(sheetName)
+    setSiteName(sheetName)
     if (!taskFile || !invoker) return
     setLoadingTaskMap(true)
     try {
@@ -584,9 +592,17 @@ export default function HorizonModule({ D, isPyWebView, onOpenFolder }) {
       }
     })
 
+    const woObj = workorders.find(
+      w => w.workorders_id === selectedWo || w.id === selectedWo
+    )
+    const workorderNumber =
+      woObj?.description || woObj?.workorder_description || ''
+
     try {
       const res = await invoker.horizon_process_from_arthnex?.({
         workorderId: selectedWo,
+        workorderNumber,
+        taskFilePath: taskFile,
         taskMap: effectiveTaskMap,
         selectedTurbines,
         siteName,
