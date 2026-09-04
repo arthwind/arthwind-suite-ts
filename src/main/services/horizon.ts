@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
+import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
+import { arthnexApi } from './arthnexApi'
 import { parseDate } from './workflow'
 
 // ─── Constants and Interfaces ──────────────────────────────────────────────────
@@ -17,6 +19,56 @@ export const INSPECTION_TYPES_VALIDOS = [
   'Tower External',
   'Transition Piece',
 ]
+
+export const BLADE_CHAMBER_MAP: Record<number, string> = {
+  1: 'leading_edge',
+  2: 'trailing_edge',
+  3: 'between_web_1',
+  4: 'suction_side',
+  5: 'pressure_side',
+}
+
+export const BLADE_SIDE_DEFECT_MAP: Record<string, string> = {
+  LE: 'Leading Edge',
+  TE: 'Trailing Edge',
+  CE: 'Suction Side',
+  SS: 'Suction Side',
+  PS: 'Pressure Side',
+  'Leading Edge': 'Leading Edge',
+  'Trailing Edge': 'Trailing Edge',
+  'Suction Side': 'Suction Side',
+  'Pressure Side': 'Pressure Side',
+}
+
+export function resolveBladeLetter(blade: any, bladeIndex?: number): string {
+  if (blade) {
+    const rawLetter = String(blade.blade_letter || '')
+      .trim()
+      .toUpperCase()
+    if (['A', 'B', 'C'].includes(rawLetter)) return rawLetter
+
+    const rawBlade = String(blade.blade || blade.Blade || '').trim()
+    if (['A', 'B', 'C'].includes(rawBlade.toUpperCase())) {
+      return rawBlade.toUpperCase()
+    }
+
+    const match =
+      rawBlade.match(/Blade\s*([ABC])/i) ||
+      rawBlade.match(/\b([ABC])\b/i) ||
+      rawLetter.match(/Blade\s*([ABC])/i)
+    if (match) return match[1].toUpperCase()
+
+    if (rawBlade === '1' || rawLetter === '1') return 'A'
+    if (rawBlade === '2' || rawLetter === '2') return 'B'
+    if (rawBlade === '3' || rawLetter === '3') return 'C'
+  }
+
+  if (typeof bladeIndex === 'number' && bladeIndex >= 0 && bladeIndex < 3) {
+    return ['A', 'B', 'C'][bladeIndex]
+  }
+
+  return 'A'
+}
 
 export interface ValidationResult {
   success: boolean
@@ -331,6 +383,69 @@ function toCsv(data: any[], delimiter = ','): string {
   return csvLines.join('\r\n')
 }
 
+export function formatCoordinatesForHorizon(coordsRaw: any): string {
+  if (!coordsRaw) return ''
+  let str = String(coordsRaw).trim()
+  if (!str || str === '[]' || str === '""') return ''
+
+  str = str.replace(/^"|"$/g, '').replace(/^"|"$/g, '')
+
+  // Se já estiver no formato padrão SkySpecs Horizon [x,y],[x,y],...
+  if (/^(\[\d+,\s*\d+\],?\s*)+$/.test(str)) {
+    return str.replace(/\s+/g, '')
+  }
+
+  // Regex universal para capturar pares x e y em qualquer formato: {x: 123, y: 456}, {"x": 123, "y": 456}, etc.
+  const xyMatches = Array.from(
+    str.matchAll(/x["\s:]+([-\d.]+)[,\s]+y["\s:]+([-\d.]+)/gi)
+  )
+  if (xyMatches.length > 0) {
+    const points = xyMatches.map(m => {
+      const x = Math.abs(Math.round(Number(m[1])))
+      const y = Math.abs(Math.round(Number(m[2])))
+      return `[${x},${y}]`
+    })
+    return points.join(',')
+  }
+
+  try {
+    let parsed = JSON.parse(str)
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 1 && Array.isArray(parsed[0])) {
+        parsed = parsed[0]
+      }
+
+      const points: string[] = []
+      for (const pt of parsed) {
+        if (Array.isArray(pt) && pt.length >= 2) {
+          const x = Math.abs(Math.round(Number(pt[0])))
+          const y = Math.abs(Math.round(Number(pt[1])))
+          points.push(`[${x},${y}]`)
+        } else if (pt && typeof pt === 'object' && ('x' in pt || 'y' in pt)) {
+          const x = Math.abs(Math.round(Number(pt.x || 0)))
+          const y = Math.abs(Math.round(Number(pt.y || 0)))
+          points.push(`[${x},${y}]`)
+        }
+      }
+
+      if (points.length > 0) {
+        return points.join(',')
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  if (str.startsWith('[[') && str.endsWith(']]')) {
+    const inner = str.substring(1, str.length - 1).trim()
+    if (/^(\[\d+,\s*\d+\],?\s*)+$/.test(inner)) {
+      return inner.replace(/\s+/g, '')
+    }
+  }
+
+  return str.replace(/\s+/g, '')
+}
+
 function toDamageCsv(data: any[]): string {
   if (data.length === 0) return ''
   const csvLines = [SKYSPECS_COLUMNS.join(',')]
@@ -341,7 +456,8 @@ function toDamageCsv(data: any[]): string {
         .replace(/^"|"$/g, '')
         .replace(/^'|'$/g, '')
       if (c === 'Coordinates') {
-        return `"${val}"`
+        const formatted = formatCoordinatesForHorizon(val)
+        return `"${formatted}"`
       }
       if (val.includes(',') || val.includes('"') || val.includes('\n')) {
         return `"${val.replace(/"/g, '""')}"`
@@ -351,6 +467,115 @@ function toDamageCsv(data: any[]): string {
     csvLines.push(line)
   })
   return csvLines.join('\r\n')
+}
+
+export function partitionDetailsRows(
+  detailsRows: any[],
+  idColumnName: string,
+  zip: JSZip,
+  maxPhotosPerChunk = 4500,
+  maxTurbinesPerChunk = 20
+): void {
+  if (!detailsRows || detailsRows.length === 0) return
+
+  const rowsByTurbine: Record<string, any[]> = {}
+  const uniqueTurbinesInDetails: string[] = []
+
+  detailsRows.forEach(row => {
+    const turbId = String(row[idColumnName] || row.ID || '').trim()
+    if (!rowsByTurbine[turbId]) {
+      rowsByTurbine[turbId] = []
+      uniqueTurbinesInDetails.push(turbId)
+    }
+    rowsByTurbine[turbId].push(row)
+  })
+
+  interface DetailChunk {
+    loteNum: number
+    turbines: string[]
+    startIdx: number
+    endIdx: number
+    rows: any[]
+  }
+
+  const chunks: DetailChunk[] = []
+  let currentChunkRows: any[] = []
+  let currentChunkTurbines: string[] = []
+  let startTurbineIdx = 1
+
+  uniqueTurbinesInDetails.forEach(turbId => {
+    const turbRows = rowsByTurbine[turbId] || []
+    const photoCount = turbRows.length
+
+    if (
+      currentChunkTurbines.length > 0 &&
+      (currentChunkRows.length + photoCount > maxPhotosPerChunk ||
+        currentChunkTurbines.length >= maxTurbinesPerChunk)
+    ) {
+      const loteNum = chunks.length + 1
+      const endTurbineIdx = startTurbineIdx + currentChunkTurbines.length - 1
+      chunks.push({
+        loteNum,
+        turbines: [...currentChunkTurbines],
+        startIdx: startTurbineIdx,
+        endIdx: endTurbineIdx,
+        rows: currentChunkRows,
+      })
+
+      startTurbineIdx = endTurbineIdx + 1
+      currentChunkRows = []
+      currentChunkTurbines = []
+    }
+
+    currentChunkTurbines.push(turbId)
+    currentChunkRows.push(...turbRows)
+  })
+
+  if (currentChunkTurbines.length > 0) {
+    const loteNum = chunks.length + 1
+    const endTurbineIdx = startTurbineIdx + currentChunkTurbines.length - 1
+    chunks.push({
+      loteNum,
+      turbines: [...currentChunkTurbines],
+      startIdx: startTurbineIdx,
+      endIdx: endTurbineIdx,
+      rows: currentChunkRows,
+    })
+  }
+
+  // Grava exclusivamente dentro da pasta Details/ sem redundância
+  chunks.forEach(chunk => {
+    const startStr = String(chunk.startIdx).padStart(2, '0')
+    const endStr = String(chunk.endIdx).padStart(2, '0')
+    const loteFilename = `Details/details_lote_${chunk.loteNum}_turbinas_${startStr}_a_${endStr}.csv`
+    const normalizedRows = chunk.rows.map(row => {
+      const idVal = String(row[idColumnName] || row.ID || '').trim()
+      const pathVal = row.Path || row['File Name'] || row.fileName || ''
+      const urlVal = row['Image URL'] || row.URL || row.url || ''
+      const bladeVal = resolveBladeLetter(row)
+      const chamberVal =
+        row['Blade Chamber'] ||
+        row.blade_chamber ||
+        row.chamber ||
+        'trailing_edge'
+      const bladeSideVal = row['Blade Side'] || row.blade_side || 'suction_side'
+      const radVal = row['Radial Distance'] || row.location || '0'
+
+      return {
+        ID: idVal,
+        'Horizon Task ID': row['Horizon Task ID'] || '',
+        Blade: bladeVal,
+        'Blade Chamber': chamberVal,
+        'Blade Side': bladeSideVal,
+        Direction: row.Direction || '',
+        Height: row.Height || '',
+        'Radial Distance': radVal,
+        'Image URL': urlVal,
+        Path: pathVal,
+      }
+    })
+    zip.file(loteFilename, toCsv(normalizedRows, ','))
+  })
 }
 
 interface MappingEntry {
@@ -915,6 +1140,9 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
       })
     }
 
+    const lengthStr = String(row['Length'] ?? row['Length (m)'] ?? '0')
+    const distanceStr = String(row['Distance'] ?? row['Distance (m)'] ?? '0')
+
     convertedRows.push({
       'Photo File Name': String(row['Photo File Name'] || ''),
       Date: formatDateIso(row['Date'] || row['Inspection Date'] || ''),
@@ -926,9 +1154,9 @@ function convertDamagesDf(df: any[], filename: string): DmgConversionResult {
       'Blade Side': String(row['Blade Side'] || ''),
       Severity: severityFinal,
       'Width (m)': widthStr,
-      'Length (m)': String(row['Length'] || ''),
-      'Distance (m)': String(row['Distance'] || ''),
-      Coordinates: String(row['Coordinates'] || '').replace(/\s+/g, ''),
+      'Length (m)': lengthStr,
+      'Distance (m)': distanceStr,
+      Coordinates: formatCoordinatesForHorizon(row['Coordinates']),
     })
   })
 
@@ -1648,37 +1876,7 @@ export async function horizonGerarPacote(
       }
 
       dfDetailsFinal = dfD
-      zip.file('details_final.csv', toCsv(dfD, ';'))
-      zip.file('Details/details_final.csv', toCsv(dfD, ';'))
-
-      // Divisão do Details em lotes de até 20 aerogeradores (turbinas)
-      const rowsByTurbine: Record<string, any[]> = {}
-      const uniqueTurbinesInDetails: string[] = []
-
-      dfD.forEach(row => {
-        const turbId = String(row[idc] || '').trim()
-        if (!rowsByTurbine[turbId]) {
-          rowsByTurbine[turbId] = []
-          uniqueTurbinesInDetails.push(turbId)
-        }
-        rowsByTurbine[turbId].push(row)
-      })
-
-      const CHUNK_SIZE = 20
-      for (let i = 0; i < uniqueTurbinesInDetails.length; i += CHUNK_SIZE) {
-        const chunkTurbines = uniqueTurbinesInDetails.slice(i, i + CHUNK_SIZE)
-        const chunkRows: any[] = []
-        chunkTurbines.forEach(t => {
-          chunkRows.push(...rowsByTurbine[t])
-        })
-        const loteNum = Math.floor(i / CHUNK_SIZE) + 1
-        const startNum = String(i + 1).padStart(2, '0')
-        const endNum = String(
-          Math.min(i + CHUNK_SIZE, uniqueTurbinesInDetails.length)
-        ).padStart(2, '0')
-        const loteFilename = `Details/details_lote_${loteNum}_turbinas_${startNum}_a_${endNum}.csv`
-        zip.file(loteFilename, toCsv(chunkRows, ';'))
-      }
+      partitionDetailsRows(dfD, idc, zip, 4500, 20)
 
       if (nRadCorrigidos > 0) {
         errosPos.push(
@@ -1952,22 +2150,14 @@ export async function horizonCorrigirDamagesDireto(
             .join(',')
             .trim()
             .replace(/^['"]|['"]$/g, '')
-          if (coordsVal.startsWith('[[') && coordsVal.endsWith(']]')) {
-            coordsVal = coordsVal.substring(1, coordsVal.length - 1)
-          }
-          coordsVal = coordsVal.replace(/\s+/g, '')
+          coordsVal = formatCoordinatesForHorizon(coordsVal)
           rowData = [...rowBefore, coordsVal, ...rowAfter]
         } else {
           rowData = parts
             .slice(0, headers.length)
             .map(val => val.trim().replace(/^['"]|['"]$/g, ''))
           if (rowData.length > coordsIdx) {
-            let cVal = rowData[coordsIdx]
-            if (cVal.startsWith('[[') && cVal.endsWith(']]')) {
-              cVal = cVal.substring(1, cVal.length - 1)
-            }
-            cVal = cVal.replace(/\s+/g, '')
-            rowData[coordsIdx] = cVal
+            rowData[coordsIdx] = formatCoordinatesForHorizon(rowData[coordsIdx])
           }
         }
 
@@ -2011,5 +2201,588 @@ export async function horizonCorrigirDamagesDireto(
   } catch (err: any) {
     sendLog(`Erro ao higienizar damages: ${err.message}`, 'error')
     return { success: false, error: err.message }
+  }
+}
+
+// ─── Smart XLSX Sheet & Task ID Extraction ────────────────────────────────────
+
+export async function listXlsxSheets(filePath: string): Promise<{
+  success: boolean
+  sheets: Array<{ name: string; rowCount: number }>
+  error?: string
+}> {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return { success: false, sheets: [], error: 'Arquivo não encontrado' }
+    }
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(filePath)
+    const sheets = wb.worksheets.map(w => ({
+      name: w.name,
+      rowCount: w.rowCount,
+    }))
+    return { success: true, sheets }
+  } catch (err: any) {
+    return { success: false, sheets: [], error: err.message }
+  }
+}
+
+export async function extractHorizonTaskIdsFromXlsx(
+  filePath: string,
+  sheetName?: string
+): Promise<{
+  success: boolean
+  sheet: string
+  sheets: string[]
+  taskMap: Record<string, string>
+  count: number
+  error?: string
+}> {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return {
+        success: false,
+        sheet: '',
+        sheets: [],
+        taskMap: {},
+        count: 0,
+        error: 'Arquivo não encontrado',
+      }
+    }
+
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(filePath)
+    const allSheetNames = wb.worksheets.map(w => w.name)
+
+    let targetSheet: ExcelJS.Worksheet | undefined
+    if (sheetName) {
+      targetSheet = wb.worksheets.find(
+        w => w.name.trim().toLowerCase() === sheetName.trim().toLowerCase()
+      )
+    }
+    if (!targetSheet) {
+      targetSheet = wb.worksheets[0]
+    }
+
+    if (!targetSheet) {
+      return {
+        success: false,
+        sheet: '',
+        sheets: allSheetNames,
+        taskMap: {},
+        count: 0,
+        error: 'Nenhuma aba encontrada na planilha.',
+      }
+    }
+
+    let headerRowIdx = 1
+    let turbineColIdx = 1
+    let taskColIdx = 2
+
+    for (let r = 1; r <= Math.min(10, targetSheet.rowCount); r++) {
+      const rowVals = targetSheet.getRow(r).values
+      if (Array.isArray(rowVals)) {
+        rowVals.forEach((val, cIdx) => {
+          const s = String(val || '')
+            .toLowerCase()
+            .trim()
+          if (
+            s.includes('turbine') ||
+            s.includes('turbina') ||
+            s.includes('wtg') ||
+            s === 'id'
+          ) {
+            headerRowIdx = r
+            turbineColIdx = cIdx
+          }
+          if (
+            s.includes('horizon task id') ||
+            s.includes('task id') ||
+            s.includes('taskid') ||
+            s.includes('horizon id')
+          ) {
+            taskColIdx = cIdx
+          }
+        })
+      }
+      if (headerRowIdx > 1) break
+    }
+
+    const taskMap: Record<string, string> = {}
+    for (let r = headerRowIdx + 1; r <= targetSheet.rowCount; r++) {
+      const row = targetSheet.getRow(r)
+      const turbineVal = String(row.getCell(turbineColIdx).value || '').trim()
+      let taskVal = String(row.getCell(taskColIdx).value || '').trim()
+
+      if (!taskVal || taskVal === 'null' || taskVal === 'undefined') {
+        const rowVals = row.values
+        if (Array.isArray(rowVals)) {
+          for (let c = 1; c < rowVals.length; c++) {
+            const v = String(rowVals[c] || '').trim()
+            if (
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                v
+              )
+            ) {
+              taskVal = v
+              break
+            }
+          }
+        }
+      }
+
+      if (
+        turbineVal &&
+        taskVal &&
+        taskVal !== 'null' &&
+        taskVal !== 'undefined'
+      ) {
+        taskMap[turbineVal] = taskVal
+      }
+    }
+
+    return {
+      success: true,
+      sheet: targetSheet.name,
+      sheets: allSheetNames,
+      taskMap,
+      count: Object.keys(taskMap).length,
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      sheet: '',
+      sheets: [],
+      taskMap: {},
+      count: 0,
+      error: err.message,
+    }
+  }
+}
+
+// ─── Arthnex Cloud Direct Processing ──────────────────────────────────────────
+
+export interface HorizonArthnexParams {
+  workorderId: string
+  workorderNumber?: string
+  taskFilePath?: string
+  taskMap: Record<string, string>
+  selectedTurbines?: string[]
+  siteName?: string
+  inspectionType?: string
+  outputPath?: string
+  sendLog?: (msg: string, type?: string) => void
+}
+
+export async function horizonProcessarFromArthnex(
+  params: HorizonArthnexParams
+): Promise<{
+  success: boolean
+  zipPath?: string
+  summaryCount: number
+  detailsCount: number
+  damagesCount: number
+  warnings: string[]
+  error?: string
+}> {
+  const {
+    workorderId,
+    workorderNumber,
+    taskFilePath,
+    taskMap,
+    selectedTurbines,
+    siteName,
+    inspectionType = 'Blade Internal',
+    outputPath,
+    sendLog = () => {},
+  } = params
+
+  try {
+    sendLog(
+      `Iniciando processamento Horizon via Arthnex para a O.S. ${workorderId}...`,
+      'info'
+    )
+
+    // 1. Obter turbinas e pás da Workorder
+    let resolvedWindfarmId = 0
+    try {
+      const wos = await arthnexApi.getWorkorders()
+      const foundWo = wos.find(
+        w => String(w.workorders_id) === String(workorderId)
+      )
+      if (foundWo && foundWo.windfarm_id) {
+        resolvedWindfarmId = foundWo.windfarm_id
+      }
+    } catch {
+      // fallback
+    }
+
+    const allTurbineItems = await arthnexApi.getTurbinesAndBladesByWo(
+      workorderId,
+      resolvedWindfarmId || undefined
+    )
+    if (!allTurbineItems || allTurbineItems.length === 0) {
+      throw new Error(`Nenhuma turbina encontrada na O.S. ${workorderId}`)
+    }
+
+    // 2. Filtrar turbinas selecionadas se houver filtro
+    let targetTurbines = allTurbineItems
+    if (selectedTurbines && selectedTurbines.length > 0) {
+      const selNorm = new Set(selectedTurbines.map(t => normalizar(t)))
+      targetTurbines = allTurbineItems.filter(t =>
+        selNorm.has(normalizar(t.turbine))
+      )
+      sendLog(
+        `Filtro aplicado: ${targetTurbines.length} de ${allTurbineItems.length} turbina(s) selecionada(s).`,
+        'info'
+      )
+    }
+
+    if (targetTurbines.length === 0) {
+      throw new Error('Nenhuma turbina restante após aplicar o filtro.')
+    }
+
+    // 3. Mapear Horizon Task IDs com normalização fuzzy
+    const taskMapNorm: Record<string, { orig: string; taskId: string }> = {}
+    Object.entries(taskMap || {}).forEach(([k, v]) => {
+      taskMapNorm[normalizar(k)] = { orig: k, taskId: v }
+    })
+
+    const warnings: string[] = []
+    const summaryRows: any[] = []
+    const detailsRows: any[] = []
+    const zip = new JSZip()
+    const allFlags: any[] = []
+    let totalDamages = 0
+
+    // 4. Processar cada turbina
+    let campaignDate = ''
+
+    for (const item of targetTurbines) {
+      const turbName = item.turbine
+      const normKey = normalizar(turbName)
+      const matchedTask =
+        taskMap[turbName] || taskMapNorm[normKey]?.taskId || ''
+
+      if (!matchedTask) {
+        warnings.push(`Turbina ${turbName}: sem Horizon Task ID mapeado.`)
+      }
+
+      // Buscar fotos da galeria e defeitos de todas as pás da turbina
+      const turbineDefects: any[] = []
+      let collectDateDetected = ''
+      let picDateDetected = ''
+      let firstDefectDate = ''
+
+      const windbladesList = item.windblades || []
+      for (let bIdx = 0; bIdx < windbladesList.length; bIdx++) {
+        const blade = windbladesList[bIdx]
+        const bladeLetter = resolveBladeLetter(blade, bIdx)
+        try {
+          // 4.0 Buscar data real de coleta/voo de fotos (colletion_date_photos_turbine)
+          if (!collectDateDetected) {
+            const cdRaw = await arthnexApi.getCollectDate(
+              item.turbine_id || item.id,
+              workorderId,
+              blade.windblade_id
+            )
+            if (cdRaw) {
+              const parsedCd = formatDateIso(cdRaw)
+              if (parsedCd) collectDateDetected = parsedCd
+            }
+          }
+
+          // 4.1 Buscar TODAS as fotos de inspeção da galeria desta pá
+          const pictures = await arthnexApi.getPicturesByBlade(
+            workorderId,
+            blade.windblade_id
+          )
+
+          if (pictures && pictures.length > 0) {
+            const seenChamberLoc = new Set<string>()
+
+            for (const pic of pictures) {
+              if (!picDateDetected && pic.created_at) {
+                const parsed = formatDateIso(pic.created_at)
+                if (parsed) picDateDetected = parsed
+              }
+
+              let rawUrl = pic.image_url || ''
+              const urlPathOnly = rawUrl.split('?')[0].split('#')[0]
+              const cleanName =
+                path.basename(urlPathOnly) || `photo_${pic.id}.jpg`
+              const rawLoc = Number(pic.gallery_location || 0)
+              const radDist = (rawLoc > 200 ? rawLoc / 1000 : rawLoc).toFixed(2)
+
+              let fullUrl = rawUrl
+              if (fullUrl.startsWith('https://blob.arthnex.com/http')) {
+                fullUrl = fullUrl.replace('https://blob.arthnex.com/', '')
+              } else if (!fullUrl.startsWith('http')) {
+                fullUrl = `https://blob.arthnex.com/${
+                  fullUrl.startsWith('galleries/')
+                    ? fullUrl
+                    : `galleries/${fullUrl}`
+                }`
+              }
+
+              const chamber =
+                BLADE_CHAMBER_MAP[Number(pic.region)] || 'trailing_edge'
+              const sideKey = `${radDist}_${pic.region || 0}_${blade.windblade_id}`
+              let resolvedBladeSide = 'suction_side'
+              if (seenChamberLoc.has(sideKey)) {
+                resolvedBladeSide = 'pressure_side'
+              } else {
+                seenChamberLoc.add(sideKey)
+              }
+
+              detailsRows.push({
+                ID: turbName,
+                'Horizon Task ID': matchedTask,
+                Blade: bladeLetter,
+                'Blade Chamber': chamber,
+                'Blade Side': resolvedBladeSide,
+                Direction: '',
+                Height: '',
+                'Radial Distance': radDist,
+                'Image URL': fullUrl,
+                Path: cleanName,
+              })
+            }
+          }
+
+          // 4.2 Buscar defeitos auditados desta pá
+          const defects = await arthnexApi.getDefectsByBlade({
+            workorderId,
+            windfarmId: item.windfarm_id || resolvedWindfarmId || 0,
+            turbineId: item.turbine_id,
+            windbladeId: blade.windblade_id,
+          })
+
+          for (const d of defects || []) {
+            let itemDefectDate = ''
+            if (d.date) {
+              const parsed = formatDateIso(d.date)
+              if (parsed) {
+                itemDefectDate = parsed
+                if (!firstDefectDate) firstDefectDate = parsed
+              }
+            }
+
+            const dUrlPathOnly = String(d.image_url || '')
+              .split('?')[0]
+              .split('#')[0]
+            const photoName = dUrlPathOnly
+              ? path.basename(dUrlPathOnly)
+              : `photo_${d.id}.jpg`
+            const defectSide =
+              BLADE_SIDE_DEFECT_MAP[d.section || d.side || ''] ||
+              d.section ||
+              d.side ||
+              'Leading Edge'
+
+            let rawW = Number(d.width || 0)
+            if (rawW > 20) rawW = rawW / 1000
+            const widthStr = rawW > 0 ? String(rawW) : '0'
+
+            let rawL = Number(d.length || 0)
+            if (rawL > 20) rawL = rawL / 1000
+            const lengthStr = rawL > 0 ? String(rawL) : '0'
+
+            turbineDefects.push({
+              'Photo File Name': photoName,
+              Date: itemDefectDate,
+              Type: d.name,
+              Severity: String(d.severity || 1),
+              Width: widthStr,
+              Length: lengthStr,
+              Distance: String(d.location || '0'),
+              Coordinates: d.coordinates || '',
+              Surface: d.surface || 'External',
+              'Blade Side': defectSide,
+            })
+
+            // Fallback: se por algum motivo a galeria não veio, garante que a foto do dano esteja no Details
+            if (!pictures || pictures.length === 0) {
+              detailsRows.push({
+                ID: turbName,
+                'Horizon Task ID': matchedTask,
+                Blade: bladeLetter,
+                'Blade Chamber': 'trailing_edge',
+                'Blade Side': 'suction_side',
+                Direction: '',
+                Height: '',
+                'Radial Distance': String(d.location || '0'),
+                'Image URL': d.image_url || '',
+                Path: photoName,
+              })
+            }
+          }
+        } catch (e: any) {
+          warnings.push(
+            `Erro ao consultar dados da pá ${blade.blade} (${turbName}): ${e.message}`
+          )
+        }
+      }
+
+      // 4.3 Resolver data real de inspeção da turbina (prioriza coleta de campo)
+      let inspectionDate =
+        collectDateDetected || firstDefectDate || picDateDetected
+
+      if (!inspectionDate) {
+        try {
+          const opData = await arthnexApi.getTechnicianAndDateByTurbine(
+            turbName,
+            workorderId
+          )
+          if (opData?.date) {
+            inspectionDate = formatDateIso(opData.date)
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      // Se esta turbina não tem data em nenhum registro, usa a data predominante da campanha
+      if (!inspectionDate && campaignDate) {
+        inspectionDate = campaignDate
+      }
+
+      // Fallback final apenas se a O.S. inteira não possuir nenhuma data
+      if (!inspectionDate) {
+        inspectionDate = formatDateIso(new Date())
+      } else if (!campaignDate) {
+        campaignDate = inspectionDate
+      }
+
+      const currentSite = siteName || item.workorder_description || 'Wind Farm'
+
+      // Summary Row com o padrão oficial de 10 colunas da SkySpecs Horizon
+      summaryRows.push({
+        ID: turbName,
+        Description: '',
+        'Inspection Date': inspectionDate,
+        'Horizon Task ID': matchedTask,
+        'Inspection Type': inspectionType,
+        Site: currentSite,
+        Turbine: turbName,
+        'Component Serial Number': '',
+        'Component Type': '',
+        Vendor: '',
+      })
+
+      // Se houver danos, converter para SkySpecs taxonomy e gravar no ZIP
+      if (turbineDefects.length > 0) {
+        // Preenche data dos defeitos sem data com a data da inspeção
+        turbineDefects.forEach(td => {
+          if (!td.Date) td.Date = inspectionDate
+        })
+
+        totalDamages += turbineDefects.length
+        const { convertedRows, flags } = convertDamagesDf(
+          turbineDefects,
+          `${turbName}.csv`
+        )
+        allFlags.push(...flags)
+
+        convertedRows.forEach(row => {
+          row['Turbine'] = turbName
+          row['Site'] = currentSite
+          row['Inspection Date'] = inspectionDate
+          if (!row['Date']) row['Date'] = inspectionDate
+        })
+
+        zip.file(`Damages/${turbName}.csv`, toDamageCsv(convertedRows))
+      }
+    }
+
+    // 5. Adicionar Summary ao ZIP
+    zip.file('summary_final.csv', toCsv(summaryRows, ','))
+
+    // 6. Adicionar Details particionado (máx 4500 fotos por lote, sem cortar turbinas)
+    if (detailsRows.length > 0) {
+      partitionDetailsRows(detailsRows, 'ID', zip, 4500, 20)
+    }
+
+    // 7. Adicionar alertas de conversão se existirem
+    if (allFlags.length > 0) {
+      zip.file('ALERTAS_CONVERSAO.csv', toCsv(allFlags, ','))
+    }
+
+    // 8. Gerar arquivo ZIP final
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 },
+    })
+
+    let finalZipPath = outputPath
+    if (!finalZipPath) {
+      let targetDir =
+        taskFilePath && fs.existsSync(path.dirname(taskFilePath))
+          ? path.dirname(taskFilePath)
+          : ''
+
+      if (!targetDir) {
+        targetDir =
+          process.platform === 'win32'
+            ? path.join(process.env.USERPROFILE || 'C:\\', 'Downloads')
+            : path.join(process.env.HOME || '/tmp', 'Downloads')
+      }
+
+      const rawSite = siteName || targetTurbines[0]?.workorder_description || ''
+      const cleanSite = rawSite
+        .replace(/[\\/*?:"<>|]/g, '')
+        .trim()
+        .replace(/\s+/g, '_')
+
+      const rawWo =
+        workorderNumber ||
+        (targetTurbines[0]?.workorder_description &&
+        targetTurbines[0].workorder_description !== rawSite
+          ? targetTurbines[0].workorder_description
+          : '')
+      const cleanWo = rawWo
+        .replace(/[\\/*?:"<>|]/g, '')
+        .trim()
+        .replace(/\s+/g, '_')
+
+      let baseName = 'Horizon_Package'
+      if (cleanSite && cleanWo && cleanSite !== cleanWo) {
+        baseName = `Horizon_Package_${cleanSite}_${cleanWo}`
+      } else if (cleanSite) {
+        baseName = `Horizon_Package_${cleanSite}`
+      } else if (cleanWo) {
+        baseName = `Horizon_Package_${cleanWo}`
+      } else {
+        baseName = `Horizon_Package_${workorderId}`
+      }
+
+      finalZipPath = path.join(targetDir, `${baseName}.zip`)
+    }
+
+    fs.writeFileSync(finalZipPath, zipBuffer)
+    sendLog(
+      `✔ Pacote Horizon ZIP gerado com sucesso: ${finalZipPath}`,
+      'success'
+    )
+
+    return {
+      success: true,
+      zipPath: finalZipPath,
+      summaryCount: summaryRows.length,
+      detailsCount: detailsRows.length,
+      damagesCount: totalDamages,
+      warnings,
+    }
+  } catch (err: any) {
+    sendLog(`Erro no processamento Horizon: ${err.message}`, 'error')
+    return {
+      success: false,
+      summaryCount: 0,
+      detailsCount: 0,
+      damagesCount: 0,
+      warnings: [],
+      error: err.message,
+    }
   }
 }

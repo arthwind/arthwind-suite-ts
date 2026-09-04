@@ -71,6 +71,26 @@ export interface ArthnexDefect {
   is_360?: boolean
   repair_action?: string
   sub_component?: string
+  layer?: string
+  date?: string
+  width?: number
+  length?: number
+}
+
+export interface ArthnexGalleryPicture {
+  id: number
+  windblade_id: number
+  pixel_size_mm?: string | null
+  width?: number | null
+  height?: number | null
+  workorder_id: string
+  thumbnail?: boolean | null
+  gallery_location?: string | null
+  gallery_location_default?: string | null
+  picture_order?: number | null
+  region?: number
+  image_url: string
+  created_at?: string | null
 }
 
 const DEFAULT_ENDPOINTS: Record<
@@ -142,7 +162,7 @@ export class ArthnexApiService {
   }
 
   public getEnv(): ArthnexEnv {
-    return this.authConfig?.environment || 'homolog'
+    return this.authConfig?.environment || 'production'
   }
 
   public setEnv(env: ArthnexEnv): void {
@@ -252,7 +272,7 @@ export class ArthnexApiService {
   public async login(
     email: string,
     pass: string,
-    environment: ArthnexEnv = 'homolog'
+    environment: ArthnexEnv = 'production'
   ): Promise<{
     success: boolean
     user?: any
@@ -260,7 +280,7 @@ export class ArthnexApiService {
     temp_token?: string
     error?: string
   }> {
-    const env = environment || 'homolog'
+    const env = environment || 'production'
     const baseUrl = DEFAULT_ENDPOINTS[env].backend
 
     try {
@@ -319,9 +339,9 @@ export class ArthnexApiService {
   public async verifyMfa(
     code: string,
     tempToken: string,
-    environment: ArthnexEnv = 'homolog'
+    environment: ArthnexEnv = 'production'
   ): Promise<{ success: boolean; user?: any; error?: string }> {
-    const env = environment || 'homolog'
+    const env = environment || 'production'
     const baseUrl = DEFAULT_ENDPOINTS[env].backend
 
     try {
@@ -371,7 +391,7 @@ export class ArthnexApiService {
   public setDirectToken(
     token: string,
     refreshToken?: string,
-    env: ArthnexEnv = 'homolog'
+    env: ArthnexEnv = 'production'
   ): void {
     let user: any = undefined
     try {
@@ -653,7 +673,78 @@ export class ArthnexApiService {
       repair_action: d.recommendation?.name || d.repair_action || '',
       sub_component: d.component_name || d.sub_component || '',
       layer: d.layer?.layer || '',
+      date: d.date || '',
+      width:
+        d.width !== undefined && d.width !== null
+          ? Number(d.width)
+          : d.dh_width !== undefined && d.dh_width !== null
+            ? Number(d.dh_width)
+            : Number(d.polygon_width || 0),
+      length:
+        d.length !== undefined && d.length !== null
+          ? Number(d.length)
+          : d.dh_length !== undefined && d.dh_length !== null
+            ? Number(d.dh_length)
+            : Number(d.polygon_height || d.polygon_length || 0),
     }))
+  }
+
+  /**
+   * Busca todas as fotos da galeria de inspeção de uma pá
+   */
+  public async getPicturesByBlade(
+    woId: string,
+    windbladeId: number
+  ): Promise<ArthnexGalleryPicture[]> {
+    const baseUrl = this.getBackendBaseUrl()
+    const url = `${baseUrl}upload/pictures?woId=${woId}&windbladeId=${windbladeId}`
+    let headers = await this.getAuthHeadersAsync()
+    let resp = await fetch(url, { headers })
+
+    if (resp.status === 401) {
+      const refreshed = await this.refreshAccessToken()
+      if (refreshed) {
+        headers = await this.getAuthHeadersAsync()
+        resp = await fetch(url, { headers })
+      }
+    }
+
+    if (!resp.ok) {
+      return []
+    }
+
+    const json = await resp.json()
+    return (json.pictures || []) as ArthnexGalleryPicture[]
+  }
+
+  /**
+   * Busca a data real de coleta de fotos no campo (colletion_date_photos_turbine)
+   */
+  public async getCollectDate(
+    turbineId: number | string,
+    woId: string,
+    windbladeId: number | string
+  ): Promise<string | null> {
+    const baseUrl = this.getBackendBaseUrl()
+    const url = `${baseUrl}upload/collect-date/${turbineId}/${woId}/${windbladeId}`
+    let headers = await this.getAuthHeadersAsync()
+    let resp = await fetch(url, { headers })
+
+    if (resp.status === 401) {
+      const refreshed = await this.refreshAccessToken()
+      if (refreshed) {
+        headers = await this.getAuthHeadersAsync()
+        resp = await fetch(url, { headers })
+      }
+    }
+
+    if (!resp.ok) return null
+    try {
+      const json = await resp.json()
+      return json?.date_photo || null
+    } catch {
+      return null
+    }
   }
 
   /**

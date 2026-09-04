@@ -52,10 +52,13 @@ import {
 } from './services/automationControl'
 import { batchStitchDirectory } from './services/batch360Stitcher'
 import {
+  extractHorizonTaskIdsFromXlsx,
   horizonAnalisar,
   horizonCorrigirDamagesDireto,
   horizonGerarPacote,
+  horizonProcessarFromArthnex,
   horizonValidarRequisitos,
+  listXlsxSheets,
 } from './services/horizon'
 import {
   getLogsDir,
@@ -656,6 +659,28 @@ app.whenReady().then(() => {
     }
   )
 
+  ipcMain.handle(
+    'horizon_list_xlsx_sheets',
+    async (_event, filePath: string) => {
+      return listXlsxSheets(filePath)
+    }
+  )
+
+  ipcMain.handle(
+    'horizon_extract_task_ids',
+    async (_event, filePath: string, sheetName?: string) => {
+      return extractHorizonTaskIdsFromXlsx(filePath, sheetName)
+    }
+  )
+
+  ipcMain.handle('horizon_process_from_arthnex', async (event, params: any) => {
+    return horizonProcessarFromArthnex({
+      ...params,
+      sendLog: (text: string, type?: string) =>
+        event.sender.send('log', { text, type }),
+    })
+  })
+
   // ─── Reconstruir & Rebuilder IPC Handlers ────────────────────────────────────
   ipcMain.handle('detectar_estrutura_abc', async (_event, rootPath: string) => {
     return detectarEstruturaAbc(rootPath)
@@ -791,12 +816,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'arthnex_google_login',
-    async (_event, env: ArthnexEnv = 'homolog') => {
+    async (_event, env: ArthnexEnv = 'production') => {
       return new Promise(resolve => {
         const baseUrl =
-          env === 'homolog'
-            ? 'https://backend-homolog.arthnex.com/'
-            : 'https://backend.arthnex.com/'
+          env === 'production'
+            ? 'https://backend.arthnex.com/'
+            : 'https://backend-homolog.arthnex.com/'
         const authUrl = `${baseUrl}auth/google`
 
         const authWindow = new BrowserWindow({
